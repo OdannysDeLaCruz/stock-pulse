@@ -34,4 +34,4 @@ docker-compose.yml
 .air.toml
 .air
 
-./tmp
+/tmp

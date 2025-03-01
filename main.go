@@ -14,6 +14,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/OdannysDeLaCruz/stock-tracker/migrations" // Ajusta según tu módulo
+
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"github.com/joho/godotenv"
@@ -595,22 +597,19 @@ func SearchStocks(c *gin.Context) {
 func main() {
 	InitDB()
 
-	// Eliminar tabla Stocks
-	err := DB.Exec("DROP TABLE IF EXISTS stocks").Error
-	if err != nil {
-		log.Fatal("Error al eliminar tabla stocks:", err)
-	}
+	// Solo ejecutar migraciones si se especifica
+	if os.Getenv("RUN_MIGRATIONS") == "true" {
+		if err := migrations.RunMigrations(DB); err != nil {
+			log.Fatal("Error en las migraciones:", err)
+		}
 
-	err = DB.AutoMigrate(&Stock{}, &StockPriceHistory{})
-	if err != nil {
-		log.Fatal("Error en la migración:", err)
-	}
-
-	fmt.Println("Migración completada")
-
-	_, err = GetStockAndStoreInDB()
-	if err != nil {
-		log.Fatal("Error actualizando base de datos al iniciar el servidor:", err)
+		// Cargar datos iniciales solo si se resetea la DB
+		if os.Getenv("RESET_DB") == "true" {
+			_, err := GetStockAndStoreInDB()
+			if err != nil {
+				log.Fatal("Error cargando datos iniciales:", err)
+			}
+		}
 	}
 
 	r := gin.Default()
