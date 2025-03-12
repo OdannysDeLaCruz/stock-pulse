@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math/rand"
+	// "math/rand"
 	"net/http"
 	"os"
 	"sort"
@@ -21,6 +21,7 @@ import (
 	"github.com/joho/godotenv"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+    "github.com/gin-contrib/cors"
 )
 
 var DB *gorm.DB
@@ -139,84 +140,83 @@ func initializeSimulator() {
     }
 }
 
-func fetchRealtimeStockData() ([]Stock, error) {
-    stockSimulator.mu.Lock()
-    defer stockSimulator.mu.Unlock()
+// func fetchRealtimeStockData() ([]Stock, error) {
+//     stockSimulator.mu.Lock()
+//     defer stockSimulator.mu.Unlock()
 
-    for _, stock := range stockSimulator.stocks {
-        // Lógica existente de actualización de precios...
-        changePercent := (rand.Float64() * 4) - 2
-        stock.CurrentPrice = stock.CurrentPrice * (1 + changePercent/100)
+//     for _, stock := range stockSimulator.stocks {
+//         // Lógica existente de actualización de precios...
+//         changePercent := (rand.Float64() * 4) - 2
+//         stock.CurrentPrice = stock.CurrentPrice * (1 + changePercent/100)
         
-        // Guardar el historial de precios
-        priceHistory := StockPriceHistory{
-            StockID:   stock.ID,
-            Ticker:    stock.Ticker,
-            Price:     stock.CurrentPrice,
-            Timestamp: time.Now(),
-        }
+//         // Guardar el historial de precios
+//         priceHistory := StockPriceHistory{
+//             StockID:   stock.ID,
+//             Ticker:    stock.Ticker,
+//             Price:     stock.CurrentPrice,
+//             Timestamp: time.Now(),
+//         }
         
-        if err := DB.Create(&priceHistory).Error; err != nil {
-            log.Printf("Error al guardar historial de precios: %v", err)
-        }
+//         if err := DB.Create(&priceHistory).Error; err != nil {
+//             log.Printf("Error al guardar historial de precios: %v", err)
+//         }
         
-        // Actualizar el tiempo
-        stock.Time = time.Now().Format(time.RFC3339)
+//         // Actualizar el tiempo
+//         stock.Time = time.Now().Format(time.RFC3339)
         
-        // Actualizar los targets basados en el nuevo precio
-        newTarget := stock.CurrentPrice * (1 - (rand.Float64() * 10)/100)
-        stock.TargetFrom = fmt.Sprintf("$%.2f", stock.CurrentPrice)
-        stock.TargetTo = fmt.Sprintf("$%.2f", newTarget)
+//         // Actualizar los targets basados en el nuevo precio
+//         newTarget := stock.CurrentPrice * (1 - (rand.Float64() * 10)/100)
+//         stock.TargetFrom = fmt.Sprintf("$%.2f", stock.CurrentPrice)
+//         stock.TargetTo = fmt.Sprintf("$%.2f", newTarget)
         
-        // Calcular y actualizar el ChangePct
-        targetFrom := stock.CurrentPrice
-        targetTo := newTarget
-        stock.ChangePct = ((targetTo - targetFrom) / targetFrom) * 100
+//         // Calcular y actualizar el ChangePct
+//         targetFrom := stock.CurrentPrice
+//         targetTo := newTarget
+//         stock.ChangePct = ((targetTo - targetFrom) / targetFrom) * 100
         
-        // Actualizar el rating ocasionalmente
-        if rand.Float64() < 0.1 { // 10% de probabilidad de cambio
-            ratings := []string{"Buy", "Hold", "Sell", "Strong-Buy", "Strong-Sell", "Neutral", "Overweight", "Underweight", "Outperform", "Underperform"}
-            stock.RatingTo = ratings[rand.Intn(len(ratings))]
-        }
-    }
+//         // Actualizar el rating ocasionalmente
+//         if rand.Float64() < 0.1 { // 10% de probabilidad de cambio
+//             ratings := []string{"Buy", "Hold", "Sell", "Strong-Buy", "Strong-Sell", "Neutral", "Overweight", "Underweight", "Outperform", "Underperform"}
+//             stock.RatingTo = ratings[rand.Intn(len(ratings))]
+//         }
+//     }
 
-    // Convertir el mapa a slice para retornar
-    result := make([]Stock, 0, len(stockSimulator.stocks))
-    for _, stock := range stockSimulator.stocks {
-        result = append(result, *stock)
-    }
+//     // Convertir el mapa a slice para retornar
+//     result := make([]Stock, 0, len(stockSimulator.stocks))
+//     for _, stock := range stockSimulator.stocks {
+//         result = append(result, *stock)
+//     }
 
-    return result, nil
-}
+//     return result, nil
+// }
 
-//nolint:gosimple
-func startStockUpdateService(wsHandler *WSHandler) {
-    if stockSimulator == nil {
-        initializeSimulator()
-    }
+// func startStockUpdateService(wsHandler *WSHandler) {
+//     if stockSimulator == nil {
+//         initializeSimulator()
+//     }
 
-    ticker := time.NewTicker(5 * time.Second)
-    go func() {
-        for {
-            select {
-            case <-ticker.C:
-                stocks, err := fetchRealtimeStockData()
-                if err != nil {
-                    log.Printf("Error actualizando stocks: %v", err)
-                    continue
-                }
+//     ticker := time.NewTicker(5 * time.Second)
+//     go func() {
+//         for {
+//             select {
+//             case <-ticker.C:
+//                 stocks, err := fetchRealtimeStockData()
+//                 if err != nil {
+//                     log.Printf("Error actualizando stocks: %v", err)
+//                     continue
+//                 }
                 
-                // Actualizar la base de datos
-                for _, stock := range stocks {
-                    DB.Save(&stock)
-                }
+//                 // Actualizar la base de datos
+//                 for _, stock := range stocks {
+//                     DB.Save(&stock)
+//                 }
                 
-                // Enviar actualización a todos los clientes conectados
-                wsHandler.broadcast <- stocks
-            }
-        }
-    }()
-}
+//                 // Enviar actualización a todos los clientes conectados
+//                 wsHandler.broadcast <- stocks
+//             }
+//         }
+//     }()
+// }
 
 // Obtener datos de la API externa
 func FetchStockData() ([]StockData, error) {
@@ -364,15 +364,15 @@ func recommendStocks(c *gin.Context) {
 			// Convertir los valores de target eliminando el "$" y "," para calcular el potencial
 			targetFromStr := strings.Trim(strings.ReplaceAll(stock.TargetFrom, ",", ""), "$")
 			targetToStr := strings.Trim(strings.ReplaceAll(stock.TargetTo, ",", ""), "$")
-			
+
 			targetFrom, _ := strconv.ParseFloat(targetFromStr, 64)
 			targetTo, _ := strconv.ParseFloat(targetToStr, 64)
-			
+
 			// Calcular el porcentaje de cambio potencial
 			if targetFrom > 0 {
 				stock.ChangePct = ((targetTo - targetFrom) / targetFrom) * 100
 			}
-			
+
 			validStocks = append(validStocks, stock)
 		}
 	}
@@ -404,15 +404,15 @@ func notRecommendedStocks(c *gin.Context) {
             // Convertir los valores de target eliminando el "$" y "," para calcular el potencial
             targetFromStr := strings.Trim(strings.ReplaceAll(stock.TargetFrom, ",", ""), "$")
             targetToStr := strings.Trim(strings.ReplaceAll(stock.TargetTo, ",", ""), "$")
-            
+
             targetFrom, _ := strconv.ParseFloat(targetFromStr, 64)
             targetTo, _ := strconv.ParseFloat(targetToStr, 64)
-            
+
             // Calcular el porcentaje de cambio potencial (negativo en este caso)
             if targetFrom > 0 {
                 stock.ChangePct = ((targetTo - targetFrom) / targetFrom) * 100
             }
-            
+
             validStocks = append(validStocks, stock)
         }
     }
@@ -594,6 +594,20 @@ func SearchStocks(c *gin.Context) {
     c.JSON(http.StatusOK, stocks)
 }
 
+// Middlewares
+
+func CORSMiddleware() gin.HandlerFunc {
+    var corsConfig = cors.Config{
+        AllowOrigins:     []string{"http://localhost:5173"},
+        AllowMethods:     []string{"GET", "PUT", "OPTIONS"},
+        AllowHeaders:     []string{"Origin", "Content-Length", "Content-Type", "Authorization"},
+        ExposeHeaders:    []string{"Content-Length", "Content-Type"},
+        AllowCredentials: true,
+        MaxAge: 12 * time.Hour,
+    }
+    return cors.New(corsConfig)
+}
+
 func main() {
 	InitDB()
 
@@ -614,6 +628,8 @@ func main() {
 
 	r := gin.Default()
 
+    r.Use(CORSMiddleware())
+
 	// Crear y configurar WebSocket handler
 	wsHandler := NewWSHandler()
 	go wsHandler.run()
@@ -629,7 +645,7 @@ func main() {
 	r.GET("/stocks/search", SearchStocks)
 
 	// Iniciar el servicio de actualización con WebSocket
-	startStockUpdateService(wsHandler)
+	// startStockUpdateService(wsHandler)
 
 	// Iniciar servidor
 	port := os.Getenv("PORT")
