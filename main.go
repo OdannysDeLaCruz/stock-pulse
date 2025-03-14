@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+
 	// "math/rand"
 	"net/http"
 	"os"
@@ -16,12 +17,12 @@ import (
 
 	"github.com/OdannysDeLaCruz/stock-tracker/migrations" // Ajusta según tu módulo
 
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"github.com/joho/godotenv"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
-    "github.com/gin-contrib/cors"
 )
 
 var DB *gorm.DB
@@ -598,7 +599,7 @@ func SearchStocks(c *gin.Context) {
 
 func CORSMiddleware() gin.HandlerFunc {
     var corsConfig = cors.Config{
-        AllowOrigins:     []string{"http://localhost:5173"},
+        AllowOrigins:     []string{"http://localhost:5173", "http://localhost:4173"},
         AllowMethods:     []string{"GET", "PUT", "OPTIONS"},
         AllowHeaders:     []string{"Origin", "Content-Length", "Content-Type", "Authorization"},
         ExposeHeaders:    []string{"Content-Length", "Content-Type"},
@@ -636,12 +637,12 @@ func main() {
 
 	// Rutas existentes
 	r.GET("/stocks", GetStocks)
-	r.GET("/stocks/:ticker", GetStockByTicker)
 	r.PUT("/stocks", UpdateStocks)
-	r.GET("/recommendations", recommendStocks)
-	r.GET("/not-recommended", notRecommendedStocks)
-	r.GET("/ws", wsHandler.handleConnections)
+	r.GET("/stocks/:ticker", GetStockByTicker)
 	r.GET("/stocks/:ticker/history", GetStockPriceHistory)
+	r.GET("/stocks/recommendations", recommendStocks)
+	r.GET("/stocks/not-recommended", notRecommendedStocks)
+	r.GET("/stocks/ws", wsHandler.handleConnections)
 	r.GET("/stocks/search", SearchStocks)
 
 	// Iniciar el servicio de actualización con WebSocket
