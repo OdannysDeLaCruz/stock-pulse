@@ -1,82 +1,118 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 
-	// "math/rand"
 	"net/http"
 	"os"
-	"sort"
+
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/OdannysDeLaCruz/stock-tracker/migrations" // Ajusta según tu módulo
-
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"github.com/joho/godotenv"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
 var DB *gorm.DB
 
+// Dominios permitidos para el CORS
+
+// Obtener origin desde variable de entorno
+func getOrigins() map[string]bool {
+	origins := os.Getenv("ALLOWED_ORIGINS")
+	DEFAULT_ALLOWED_ORIGINS := "http://localhost:8080"
+
+	allowedOrigins := make(map[string]bool)
+
+	// Si no hay variables de entorno, usar el valor por defecto
+	if origins == "" {
+		allowedOrigins[DEFAULT_ALLOWED_ORIGINS] = true
+		return allowedOrigins
+	}
+
+	// Dividir la cadena de orígenes en un slice y agregarlos al mapa
+	for _, origin := range strings.Split(origins, ",") {
+		allowedOrigins[strings.TrimSpace(origin)] = true
+	}
+
+	return allowedOrigins
+}
+
+var allowedOrigins = map[string]bool{}
+
 // Models
 
 type Stock struct {
 	gorm.Model
-	Ticker      string `gorm:"uniqueIndex"`
-	TargetFrom  string `gorm:"column:target_from;not null"`
-	TargetTo    string `gorm:"column:target_to;not null"`
-	Company     string `gorm:"not null"`
-	Action      string `gorm:"not null"`
-	Brokerage   string `gorm:"not null"`
+	Ticker      string `gorm:"column:ticker;uniqueIndex"`
+	TargetFrom  float64 `gorm:"column:target_from;not null"`
+	TargetTo    float64 `gorm:"column:target_to;not null"`
+	Company     string `gorm:"column:company;not null"`
+	Action      string `gorm:"column:action;not null"`
+	Brokerage   string `gorm:"column:brokerage;not null"`
 	RatingFrom  string `gorm:"column:rating_from;not null"`
 	RatingTo    string `gorm:"column:rating_to;not null"`
-	Time        string `gorm:"not null"`
-	ChangePct    float64
-	CurrentPrice float64
+	Time        string `gorm:"column:time;not null"`
+
+    // Relaciones
+    PriceHistory []StockPriceHistory `gorm:"foreignKey:StockID;constraint:OnDelete:CASCADE" json:"price_history"`
 }
 
-type StockData struct {
-	Ticker string `json:"ticker"`
-	Target_from string `json:"target_from"`
-	Target_to string `json:"target_to"`
-	Company string `json:"company"`
-	Action string `json:"action"`
-	Brokerage string `json:"brokerage"`
-	Rating_from string `json:"rating_from"`
-	Rating_to string `json:"rating_to"`
-	Time string `json:"time"`
+type StockPartialRedis struct {
+    Ticker      string `json:"ticker"`
+    TargetFrom  float64 `json:"target_from"`
+    TargetTo    float64 `json:"target_to"`
+    RatingFrom  string    `json:"rating_from"`
+	RatingTo    string    `json:"rating_to"`
+    Time        string `json:"time"`
+}
+
+type StockPriceHistory struct {
+    gorm.Model
+    StockID     uint      `gorm:"index"`
+    Ticker      string    `gorm:"index" json:"ticker"`
+    TargetFrom  float64 `json:"target_from"`
+    TargetTo    float64 `json:"target_to"`
+    Timestamp   time.Time `gorm:"index" json:"timestamp"`
+}
+
+type StockResponseAPI struct {
+	Ticker      string `json:"ticker"`
+	TargetFrom  string `json:"target_from"`
+	TargetTo    string `json:"target_to"`
+	Company     string `json:"company"`
+	Action      string `json:"action"`
+	Brokerage   string `json:"brokerage"`
+	RatingFrom  string `json:"rating_from"`
+	RatingTo    string `json:"rating_to"`
+	Time        string `json:"time"`
 }
 
 type APIResponse struct {
-    Items []StockData `json:"items"`
+    Items []StockResponseAPI `json:"items"`
     NextPage string   `json:"next_page"`
 }
 
-// Estructura para mantener los datos simulados
-type StockSimulator struct {
-    stocks map[string]*Stock
-    mu     sync.RWMutex
-}
-
-// Singleton para el simulador
-var stockSimulator *StockSimulator
-
 // Estructura para manejar las conexiones WebSocket
-type WSHandler struct {
-    clients    map[*websocket.Conn]bool
-    broadcast  chan []Stock
+type WebSocketHandler struct {
+    clients        map[*websocket.Conn]string
+    broadcast        chan []Stock
     register   chan *websocket.Conn
     unregister chan *websocket.Conn
-    mu         sync.Mutex
+    mutex         sync.Mutex
+    redisClient    *redis.Client
 }
 
 // Configuración del upgrader de WebSocket
@@ -84,36 +120,141 @@ var upgrader = websocket.Upgrader{
     ReadBufferSize:  1024,
     WriteBufferSize: 1024,
     CheckOrigin: func(r *http.Request) bool {
-        return true // En producción, configura esto adecuadamente
+        origin := r.Header.Get("Origin")
+		_, exists := allowedOrigins[origin]
+
+        return exists
     },
 }
 
-// Crear el manejador de WebSocket
-func NewWSHandler() *WSHandler {
-    return &WSHandler{
-        clients:    make(map[*websocket.Conn]bool),
+// Crear el handler de WebSocket
+func NewWebSocketHandler(redisClient *redis.Client) *WebSocketHandler {
+    return &WebSocketHandler{
+        clients:        make(map[*websocket.Conn]string),
         broadcast:  make(chan []Stock),
         register:   make(chan *websocket.Conn),
         unregister: make(chan *websocket.Conn),
+        redisClient:    redisClient,
     }
 }
 
-// Nueva estructura para el historial de precios
-type StockPriceHistory struct {
-    gorm.Model
-    StockID     uint      `gorm:"index"`
-    Ticker      string    `gorm:"index"`
-    Price       float64
-    Timestamp   time.Time `gorm:"index"`
+func (w *WebSocketHandler) handleConnections(c *gin.Context) {
+	ticker := c.Request.URL.Query().Get("ticker")
+	if ticker == "" {
+		http.Error(c.Writer, "Ticker is required", http.StatusBadRequest)
+		return
+	}
+
+	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
+	if err != nil {
+		log.Println("Error al actualizar la conexión a WebSocket:", err)
+		return
+	}
+	defer conn.Close()
+
+	w.mutex.Lock()
+	w.clients[conn] = ticker
+	w.mutex.Unlock()
+
+    // Leer los mensajes de la conexión WebSocket
+	for {
+		_, _, err := conn.ReadMessage()
+		if err != nil {
+			w.mutex.Lock()
+			delete(w.clients, conn)
+			w.mutex.Unlock()
+			break
+		}
+	}
+}
+
+// Escuchar eventos de Redis y enviarlos a los clientes WS
+func (w *WebSocketHandler) subscribeStockUpdates() {
+	ctx := context.Background()
+	pubsub := w.redisClient.Subscribe(ctx, "stock_updates")
+	defer pubsub.Close()
+
+	for {
+		msg, err := pubsub.ReceiveMessage(ctx)
+		if err != nil {
+			log.Println("Error en Redis Pub/Sub:", err)
+			continue
+		}
+
+        log.Println("🔹 Stock recibido:", msg.Payload)
+
+		var stock StockPartialRedis
+		json.Unmarshal([]byte(msg.Payload), &stock)
+
+		// Guardar en base de datos antes de enviar a clientes
+		w.saveStockUpdate(stock)
+
+		// Enviar datos solo a clientes suscritos a ese símbolo
+		w.mutex.Lock()
+		for client, subTicker := range w.clients {
+			if subTicker == stock.Ticker {
+				client.WriteMessage(websocket.TextMessage, []byte(msg.Payload))
+			}
+		}
+		w.mutex.Unlock()
+	}
+}
+
+// Guardar actualización en la base de datos CockroachDB
+func (w *WebSocketHandler) saveStockUpdate(stockPartial StockPartialRedis) error {
+
+    existingStock := Stock{}
+    result := DB.Where("ticker = ?", stockPartial.Ticker).First(&existingStock)
+
+    if result.Error != nil {
+        if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+           log.Println("No se encontró ningún registro con ese ticker")
+        } else {
+            log.Println("Error en la consulta:", result.Error)
+        }
+    } else {
+        // Actualizar el registro existente
+        existingStock.TargetFrom  = stockPartial.TargetFrom
+        existingStock.TargetTo    = stockPartial.TargetTo
+        existingStock.RatingFrom  = stockPartial.RatingFrom
+        existingStock.RatingTo    = stockPartial.RatingTo
+        existingStock.Time        = stockPartial.Time
+
+        if err := DB.Save(&existingStock).Error; err != nil {
+            return err
+        }
+
+        // Guardar historial de precios
+        priceHistory := StockPriceHistory{
+            StockID:     existingStock.ID,
+            Ticker:      existingStock.Ticker,
+            TargetFrom:  stockPartial.TargetFrom,
+            TargetTo:    stockPartial.TargetTo,
+            Timestamp:   time.Now(),
+        }
+
+        if err := DB.Create(&priceHistory).Error; err != nil {
+            log.Printf("Error al guardar historial de precios: %v", err)
+        }
+    }
+
+    return nil
+}
+
+// Convierte un string "$13.00" a float64
+func parsePrice(priceStr string) (float64, error) {
+	cleanStr := strings.Replace(priceStr, "$", "", 1) // Eliminar $
+	value, err := strconv.ParseFloat(cleanStr, 64)   // Convertir a float64
+	if err != nil {
+        fmt.Println("Error al convertir el precio:", err)
+		return 0, err
+	}
+
+	return value, nil
 }
 
 // Services
 func InitDB() {
-	err := godotenv.Load()
-	if err != nil {
-		log.Fatal("Error cargando el archivo .env")
-	}
-
 	dsn := os.Getenv("DATABASE_URL")
 	database, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
@@ -124,107 +265,12 @@ func InitDB() {
 	fmt.Println("Conectado a CockroachDB con GORM")
 }
 
-func initializeSimulator() {
-    stockSimulator = &StockSimulator{
-        stocks: make(map[string]*Stock),
-    }
-
-    // Cargar datos iniciales de la base de datos
-    var dbStocks []Stock
-    DB.Find(&dbStocks)
-
-    for _, stock := range dbStocks {
-        // Convertir el precio inicial desde TargetFrom
-        basePrice, _ := strconv.ParseFloat(strings.Trim(strings.ReplaceAll(stock.TargetFrom, ",", ""), "$"), 64)
-        stock.CurrentPrice = basePrice
-        stockSimulator.stocks[stock.Ticker] = &stock
-    }
-}
-
-// func fetchRealtimeStockData() ([]Stock, error) {
-//     stockSimulator.mu.Lock()
-//     defer stockSimulator.mu.Unlock()
-
-//     for _, stock := range stockSimulator.stocks {
-//         // Lógica existente de actualización de precios...
-//         changePercent := (rand.Float64() * 4) - 2
-//         stock.CurrentPrice = stock.CurrentPrice * (1 + changePercent/100)
-        
-//         // Guardar el historial de precios
-//         priceHistory := StockPriceHistory{
-//             StockID:   stock.ID,
-//             Ticker:    stock.Ticker,
-//             Price:     stock.CurrentPrice,
-//             Timestamp: time.Now(),
-//         }
-        
-//         if err := DB.Create(&priceHistory).Error; err != nil {
-//             log.Printf("Error al guardar historial de precios: %v", err)
-//         }
-        
-//         // Actualizar el tiempo
-//         stock.Time = time.Now().Format(time.RFC3339)
-        
-//         // Actualizar los targets basados en el nuevo precio
-//         newTarget := stock.CurrentPrice * (1 - (rand.Float64() * 10)/100)
-//         stock.TargetFrom = fmt.Sprintf("$%.2f", stock.CurrentPrice)
-//         stock.TargetTo = fmt.Sprintf("$%.2f", newTarget)
-        
-//         // Calcular y actualizar el ChangePct
-//         targetFrom := stock.CurrentPrice
-//         targetTo := newTarget
-//         stock.ChangePct = ((targetTo - targetFrom) / targetFrom) * 100
-        
-//         // Actualizar el rating ocasionalmente
-//         if rand.Float64() < 0.1 { // 10% de probabilidad de cambio
-//             ratings := []string{"Buy", "Hold", "Sell", "Strong-Buy", "Strong-Sell", "Neutral", "Overweight", "Underweight", "Outperform", "Underperform"}
-//             stock.RatingTo = ratings[rand.Intn(len(ratings))]
-//         }
-//     }
-
-//     // Convertir el mapa a slice para retornar
-//     result := make([]Stock, 0, len(stockSimulator.stocks))
-//     for _, stock := range stockSimulator.stocks {
-//         result = append(result, *stock)
-//     }
-
-//     return result, nil
-// }
-
-// func startStockUpdateService(wsHandler *WSHandler) {
-//     if stockSimulator == nil {
-//         initializeSimulator()
-//     }
-
-//     ticker := time.NewTicker(5 * time.Second)
-//     go func() {
-//         for {
-//             select {
-//             case <-ticker.C:
-//                 stocks, err := fetchRealtimeStockData()
-//                 if err != nil {
-//                     log.Printf("Error actualizando stocks: %v", err)
-//                     continue
-//                 }
-                
-//                 // Actualizar la base de datos
-//                 for _, stock := range stocks {
-//                     DB.Save(&stock)
-//                 }
-                
-//                 // Enviar actualización a todos los clientes conectados
-//                 wsHandler.broadcast <- stocks
-//             }
-//         }
-//     }()
-// }
-
-// Obtener datos de la API externa
-func FetchStockData() ([]StockData, error) {
-	baseURL := "https://8j5baasof2.execute-api.us-west-2.amazonaws.com/production/swechallenge/list"
-	var allStocks []StockData
+// Obtener datos de la API externa - seeding
+func FetchStockData() ([]Stock, error) {
+	baseURL := os.Getenv("HOST_API")
+	var allStocks []Stock
 	nextPage := ""
-	maxStocks := 40
+	maxStocks := 50
 
 	for len(allStocks) < maxStocks {
 		// Construir URL con el parámetro next_page si existe
@@ -250,15 +296,35 @@ func FetchStockData() ([]StockData, error) {
 
 		body, _ := io.ReadAll(resp.Body)
 
+        fmt.Println(string(body))
+
 		var response APIResponse
 		err = json.Unmarshal(body, &response)
 		if err != nil {
 			return nil, fmt.Errorf("error al parsear JSON: %v", err)
 		}
 
-		// Agregar los items a la lista total
-		allStocks = append(allStocks, response.Items...)
+        var dataParsed []Stock = make([]Stock, len(response.Items))
 
+        for i := range response.Items {
+            dataParsed[i].Action = response.Items[i].Action
+            dataParsed[i].Brokerage = response.Items[i].Brokerage
+            dataParsed[i].Company = response.Items[i].Company
+            dataParsed[i].RatingFrom = response.Items[i].RatingFrom
+            dataParsed[i].RatingTo = response.Items[i].RatingTo
+
+            targetFrom, _ := parsePrice(response.Items[i].TargetFrom)
+            targetTo, _ := parsePrice(response.Items[i].TargetTo)
+
+            dataParsed[i].TargetFrom = targetFrom
+            dataParsed[i].TargetTo = targetTo
+            dataParsed[i].Ticker = response.Items[i].Ticker
+            dataParsed[i].Time = response.Items[i].Time
+        }
+
+		// Agregar los items a la lista total
+		allStocks = append(allStocks, dataParsed...)
+        // fmt.Println(dataParsed)
 		// Si no hay siguiente página o ya tenemos suficientes stocks, terminamos
 		if response.NextPage == "" || len(allStocks) >= maxStocks {
 			break
@@ -267,7 +333,7 @@ func FetchStockData() ([]StockData, error) {
 		nextPage = response.NextPage
 	}
 
-	// Si tenemos más de 40 stocks, truncamos la lista
+	// Si tenemos más de 50 stocks, truncamos la lista
 	if len(allStocks) > maxStocks {
 		allStocks = allStocks[:maxStocks]
 	}
@@ -276,57 +342,55 @@ func FetchStockData() ([]StockData, error) {
 }
 
 // Guardar datos de la API externa en la base de datos
-func SaveStockData(stocks []StockData) error {
-	log.Println(stocks)
+func SaveStockData(stocks []Stock) error {
 	for _, stockData := range stocks {
 		existingStock := Stock{}
 		result := DB.Where("ticker = ?", stockData.Ticker).First(&existingStock)
 
-		if result.RowsAffected == 0 {
-			// Insertar si no existe
-			newStock := Stock{
-				Ticker:     stockData.Ticker,
-				TargetFrom: stockData.Target_from,
-				TargetTo:   stockData.Target_to,
-				Company:    stockData.Company,
-				Action:     stockData.Action,
-				Brokerage:  stockData.Brokerage,
-				RatingFrom: stockData.Rating_from,
-				RatingTo:   stockData.Rating_to,
-				Time:       stockData.Time,
-			}
-			if err := DB.Create(&newStock).Error; err != nil {
-				return err
-			}
-		} else {
-			// Actualizar si ya existe
-			existingStock.TargetFrom = stockData.Target_from
-			existingStock.TargetTo = stockData.Target_to
-			existingStock.Company = stockData.Company
-			existingStock.Action = stockData.Action
-			existingStock.Brokerage = stockData.Brokerage
-			existingStock.RatingFrom = stockData.Rating_from
-			existingStock.RatingTo = stockData.Rating_to
-			existingStock.Time = stockData.Time
+        if result.Error != nil {
+            if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+                // No se encontró ningún registro con ese ticker
+                // Insertar uno nuevo
+                newStock := Stock{
+                    Ticker:     stockData.Ticker,
+                    TargetFrom: stockData.TargetFrom,
+                    TargetTo:   stockData.TargetTo,
+                    Company:    stockData.Company,
+                    Action:     stockData.Action,
+                    Brokerage:  stockData.Brokerage,
+                    RatingFrom: stockData.RatingFrom,
+                    RatingTo:   stockData.RatingTo,
+                    Time:       stockData.Time,
+                }
+                if err := DB.Create(&newStock).Error; err != nil {
+                    return err
+                }
+            } else {
+                fmt.Println("Error en la consulta:", result.Error)
+                return result.Error
+            }
+        } else {
+            // Actualizar el registro existente
+            existingStock.TargetFrom = stockData.TargetFrom
+            existingStock.TargetTo = stockData.TargetTo
+            existingStock.Company = stockData.Company
+            existingStock.Action = stockData.Action
+            existingStock.Brokerage = stockData.Brokerage
+            existingStock.RatingFrom = stockData.RatingFrom
+            existingStock.RatingTo = stockData.RatingTo
+            existingStock.Time = stockData.Time
 
-			if err := DB.Save(&existingStock).Error; err != nil {
-				return err
-			}
+            if err := DB.Save(&existingStock).Error; err != nil {
+                return err
+            }
 		}
 	}
 
 	return nil
 }
 
-// Handlers para las rutas
-
-func GetStocks(c *gin.Context) {
-	var stocks []Stock
-	DB.Find(&stocks)
-	c.JSON(http.StatusOK, stocks)
-}
-
-func GetStockAndStoreInDB() ([]StockData, error) {
+// Seeding de datos en la base de datos
+func GetStockAndStoreInDB() ([]Stock, error) {
 	stocks, err := FetchStockData()
 	if err != nil {
 		return nil, err
@@ -338,6 +402,180 @@ func GetStockAndStoreInDB() ([]StockData, error) {
 	}
 
 	return stocks, nil
+}
+
+// Función para calcular la diferencia en valores y porcentaje
+func CalculatePriceChange(targetFrom, targetTo float64) map[string]interface{} {
+    if targetFrom != 0 && targetTo != 0 {
+        changeValue := targetTo - targetFrom
+        changePercentage := (changeValue / targetFrom) * 100
+
+        return map[string]interface{}{
+            "change_value":      changeValue,
+            "change_percentage": changePercentage,
+        }
+    }
+
+    return map[string]interface{}{
+        "change_value":      0,
+        "change_percentage": 0,
+    }
+}
+
+// Handlers para las rutas
+
+func GetStocks(c *gin.Context) {
+    var stocks []Stock
+    DB.Find(&stocks)
+
+    var stockResponses []map[string]interface{}
+
+    for _, stock := range stocks {
+        var priceHistory []StockPriceHistory
+        DB.Where("ticker = ?", stock.Ticker).Order("timestamp DESC").Find(&priceHistory)
+
+        // Formatear datos para la gráfica
+        var priceHistoryMapped = make([]map[string]interface{}, 0)
+        for _, h := range priceHistory {
+            priceHistoryMapped = append(priceHistoryMapped, map[string]interface{}{
+                "timestamp": h.Timestamp.Unix(),
+                "target_to": h.TargetTo,
+                "target_from": h.TargetFrom,
+            })
+        }
+
+        log.Println(stock.Ticker)
+        log.Println(stock.TargetFrom, stock.TargetTo)
+        priceChange := CalculatePriceChange(stock.TargetFrom, stock.TargetTo)
+        log.Println(priceChange)
+        stockResponse := map[string]interface{}{
+            "id":           stock.ID,
+            "ticker":       stock.Ticker,
+            "company":      stock.Company,
+            "action":       stock.Action,
+            "brokerage":    stock.Brokerage,
+            "rating_from":  stock.RatingFrom,
+            "rating_to":    stock.RatingTo,
+            "time":         stock.Time,
+            "target_from":  stock.TargetFrom,
+            "target_to":    stock.TargetTo,
+            "price_history": priceHistoryMapped,
+            "analysis":      priceChange,
+        }
+
+        stockResponses = append(stockResponses, stockResponse)
+    }
+
+    c.JSON(http.StatusOK, stockResponses)
+}
+
+func GetStockByTicker(c *gin.Context) {
+    ticker := c.Param("ticker") // Obtiene el ticker de la URL
+
+    // Buscar en la base de datos
+    var stock Stock
+    result := DB.Where("ticker = ?", ticker).First(&stock)
+    if result.Error != nil {
+        if result.Error == gorm.ErrRecordNotFound {
+            c.JSON(http.StatusNotFound, gin.H{
+                "error": "Stock no encontrado",
+                "ticker": ticker,
+            })
+            return
+        }
+        c.JSON(http.StatusInternalServerError, gin.H{
+            "error": "Error al buscar el stock",
+        })
+        return
+    }
+
+    var priceHistory []StockPriceHistory
+    result = DB.Where("ticker = ?", stock.Ticker).Order("timestamp DESC").Find(&priceHistory)
+
+    if result.Error != nil {
+        c.JSON(http.StatusInternalServerError, gin.H{
+            "error": "Error al buscar el stock",
+        })
+        return
+    }
+
+    // Formatear datos para la gráfica
+    var priceHistoryMapped = make([]map[string]interface{}, 0)
+    for _, h := range priceHistory {
+        priceHistoryMapped = append(priceHistoryMapped, map[string]interface{}{
+            "timestamp": h.Timestamp.Unix(),
+            "target_to": h.TargetTo,
+            "target_from": h.TargetFrom,
+        })
+    }
+
+    priceChange := CalculatePriceChange(stock.TargetFrom, stock.TargetTo)
+
+
+    stockMapped := map[string]interface{}{
+        "id":           stock.ID,
+        "ticker":       stock.Ticker,
+        "company":      stock.Company,
+        "action":       stock.Action,
+        "brokerage":    stock.Brokerage,
+        "rating_from":  stock.RatingFrom,
+        "rating_to":    stock.RatingTo,
+        "time":         stock.Time,
+        "target_from":  stock.TargetFrom,
+        "target_to":    stock.TargetTo,
+        "price_history": priceHistoryMapped,
+        "analysis":      priceChange,
+    }
+
+    c.JSON(http.StatusOK, stockMapped)
+}
+
+func GetStockPriceHistory(c *gin.Context) {
+    ticker := c.Param("ticker")
+
+    // Obtener el período de tiempo desde los query params (default último día)
+    period := c.DefaultQuery("period", "1d")
+
+    var startTime time.Time
+    endTime := time.Now()
+
+    switch period {
+    case "1d":
+        startTime = endTime.AddDate(0, 0, -1)
+    case "1w":
+        startTime = endTime.AddDate(0, 0, -7)
+    case "1m":
+        startTime = endTime.AddDate(0, -1, 0)
+    case "3m":
+        startTime = endTime.AddDate(0, -3, 0)
+    case "1y":
+        startTime = endTime.AddDate(-1, 0, 0)
+    default:
+        startTime = endTime.AddDate(0, 0, -1)
+    }
+
+    var history []StockPriceHistory
+    result := DB.Where("ticker = ? AND timestamp BETWEEN ? AND ?",
+        ticker, startTime, endTime).
+        Order("timestamp ASC").
+        Find(&history)
+
+    if result.Error != nil {
+        c.JSON(http.StatusInternalServerError, gin.H{"error": "Error al obtener historial"})
+        return
+    }
+
+    // Formatear datos para la gráfica
+    var response []map[string]interface{}
+    for _, h := range history {
+        response = append(response, map[string]interface{}{
+            "timestamp": h.Timestamp.Unix(),
+            "target_to": h.TargetTo,
+            "target_from": h.TargetFrom,
+        })
+    }
+
+    c.JSON(http.StatusOK, response)
 }
 
 func UpdateStocks(c *gin.Context) {
@@ -363,25 +601,25 @@ func recommendStocks(c *gin.Context) {
 		stockTime, err := time.Parse(time.RFC3339, stock.Time)
 		if err == nil && stockTime.After(cutoffTime) {
 			// Convertir los valores de target eliminando el "$" y "," para calcular el potencial
-			targetFromStr := strings.Trim(strings.ReplaceAll(stock.TargetFrom, ",", ""), "$")
-			targetToStr := strings.Trim(strings.ReplaceAll(stock.TargetTo, ",", ""), "$")
+			// targetFromStr := strings.Trim(strings.ReplaceAll(stock.TargetFrom, ",", ""), "$")
+			// targetToStr := strings.Trim(strings.ReplaceAll(stock.TargetTo, ",", ""), "$")
 
-			targetFrom, _ := strconv.ParseFloat(targetFromStr, 64)
-			targetTo, _ := strconv.ParseFloat(targetToStr, 64)
+			// targetFrom, _ := strconv.ParseFloat(targetFromStr, 64)
+			// targetTo, _ := strconv.ParseFloat(targetToStr, 64)
 
 			// Calcular el porcentaje de cambio potencial
-			if targetFrom > 0 {
-				stock.ChangePct = ((targetTo - targetFrom) / targetFrom) * 100
-			}
+			// if targetFrom > 0 {
+			// 	// stock.ChangePct = ((targetTo - targetFrom) / targetFrom) * 100
+			// }
 
 			validStocks = append(validStocks, stock)
 		}
 	}
 
 	// Ordenar por potencial de crecimiento (ChangePct) de mayor a menor
-	sort.Slice(validStocks, func(i, j int) bool {
-		return validStocks[i].ChangePct > validStocks[j].ChangePct
-	})
+	// sort.Slice(validStocks, func(i, j int) bool {
+	// 	return validStocks[i].ChangePct > validStocks[j].ChangePct
+	// })
 
 	// Limitar a los 5 primeros stocks
 	if len(validStocks) > 5 {
@@ -403,25 +641,25 @@ func notRecommendedStocks(c *gin.Context) {
         stockTime, err := time.Parse(time.RFC3339, stock.Time)
         if err == nil && stockTime.After(cutoffTime) {
             // Convertir los valores de target eliminando el "$" y "," para calcular el potencial
-            targetFromStr := strings.Trim(strings.ReplaceAll(stock.TargetFrom, ",", ""), "$")
-            targetToStr := strings.Trim(strings.ReplaceAll(stock.TargetTo, ",", ""), "$")
+            // targetFromStr := strings.Trim(strings.ReplaceAll(stock.TargetFrom, ",", ""), "$")
+            // targetToStr := strings.Trim(strings.ReplaceAll(stock.TargetTo, ",", ""), "$")
 
-            targetFrom, _ := strconv.ParseFloat(targetFromStr, 64)
-            targetTo, _ := strconv.ParseFloat(targetToStr, 64)
+            // targetFrom, _ := strconv.ParseFloat(targetFromStr, 64)
+            // targetTo, _ := strconv.ParseFloat(targetToStr, 64)
 
             // Calcular el porcentaje de cambio potencial (negativo en este caso)
-            if targetFrom > 0 {
-                stock.ChangePct = ((targetTo - targetFrom) / targetFrom) * 100
-            }
+            // if targetFrom > 0 {
+            //     // stock.ChangePct = ((targetTo - targetFrom) / targetFrom) * 100
+            // }
 
             validStocks = append(validStocks, stock)
         }
     }
 
     // Ordenar por potencial de pérdida (ChangePct) de menor a mayor
-    sort.Slice(validStocks, func(i, j int) bool {
-        return validStocks[i].ChangePct < validStocks[j].ChangePct
-    })
+    // sort.Slice(validStocks, func(i, j int) bool {
+        // return validStocks[i].ChangePct < validStocks[j].ChangePct
+    // })
 
     // Limitar a los 5 stocks con mayor potencial de pérdida
     if len(validStocks) > 5 {
@@ -431,140 +669,6 @@ func notRecommendedStocks(c *gin.Context) {
     c.JSON(http.StatusOK, validStocks)
 }
 
-// Método para manejar las conexiones WebSocket
-func (h *WSHandler) handleConnections(c *gin.Context) {
-    // Actualizar la conexión HTTP a WebSocket
-    ws, err := upgrader.Upgrade(c.Writer, c.Request, nil)
-    if err != nil {
-        log.Printf("Error al actualizar a websocket: %v", err)
-        return
-    }
-
-    // Registrar nuevo cliente
-    h.register <- ws
-
-    // Limpiar la conexión cuando la función termine
-    defer func() {
-        h.unregister <- ws
-        ws.Close()
-    }()
-
-    // Mantener la conexión viva
-    for {
-        // Leer mensajes del cliente (opcional)
-        _, _, err := ws.ReadMessage()
-        if err != nil {
-            break
-        }
-    }
-}
-
-// Método para ejecutar el bucle principal del WebSocket
-func (h *WSHandler) run() {
-    for {
-        select {
-        case client := <-h.register:
-            h.mu.Lock()
-            h.clients[client] = true
-            h.mu.Unlock()
-
-        case client := <-h.unregister:
-            h.mu.Lock()
-            if _, ok := h.clients[client]; ok {
-                delete(h.clients, client)
-                client.Close()
-            }
-            h.mu.Unlock()
-
-        case stocks := <-h.broadcast:
-            h.mu.Lock()
-            for client := range h.clients {
-                err := client.WriteJSON(stocks)
-                if err != nil {
-                    log.Printf("Error: %v", err)
-                    client.Close()
-                    delete(h.clients, client)
-                }
-            }
-            h.mu.Unlock()
-        }
-    }
-}
-
-// Handler para obtener un stock específico
-func GetStockByTicker(c *gin.Context) {
-    ticker := c.Param("ticker") // Obtiene el ticker de la URL
-
-    // Buscar en la base de datos
-    var stock Stock
-    result := DB.Where("ticker = ?", ticker).First(&stock)
-    
-    if result.Error != nil {
-        if result.Error == gorm.ErrRecordNotFound {
-            c.JSON(http.StatusNotFound, gin.H{
-                "error": "Stock no encontrado",
-                "ticker": ticker,
-            })
-            return
-        }
-        c.JSON(http.StatusInternalServerError, gin.H{
-            "error": "Error al buscar el stock",
-        })
-        return
-    }
-
-    c.JSON(http.StatusOK, stock)
-}
-
-// Nuevo endpoint para obtener el historial de precios
-func GetStockPriceHistory(c *gin.Context) {
-    ticker := c.Param("ticker")
-    
-    // Obtener el período de tiempo desde los query params (default último día)
-    period := c.DefaultQuery("period", "1d")
-    
-    var startTime time.Time
-    endTime := time.Now()
-    
-    switch period {
-    case "1d":
-        startTime = endTime.AddDate(0, 0, -1)
-    case "1w":
-        startTime = endTime.AddDate(0, 0, -7)
-    case "1m":
-        startTime = endTime.AddDate(0, -1, 0)
-    case "3m":
-        startTime = endTime.AddDate(0, -3, 0)
-    case "1y":
-        startTime = endTime.AddDate(-1, 0, 0)
-    default:
-        startTime = endTime.AddDate(0, 0, -1)
-    }
-
-    var history []StockPriceHistory
-    result := DB.Where("ticker = ? AND timestamp BETWEEN ? AND ?", 
-        ticker, startTime, endTime).
-        Order("timestamp ASC").
-        Find(&history)
-
-    if result.Error != nil {
-        c.JSON(http.StatusInternalServerError, gin.H{"error": "Error al obtener historial"})
-        return
-    }
-
-    // Formatear datos para la gráfica
-    var response []map[string]interface{}
-    for _, h := range history {
-        response = append(response, map[string]interface{}{
-            "timestamp": h.Timestamp.Unix(),
-            "price":     h.Price,
-        })
-    }
-
-    c.JSON(http.StatusOK, response)
-}
-
-// Agregar esta función con los handlers
 func SearchStocks(c *gin.Context) {
     query := c.Query("q")
     if query == "" {
@@ -610,43 +714,49 @@ func CORSMiddleware() gin.HandlerFunc {
 }
 
 func main() {
+    err := godotenv.Load()
+	if err != nil {
+		log.Fatal("Error cargando el archivo .env")
+	}
+
+    allowedOrigins = getOrigins()
+
+    log.Println("Allowed origins:", allowedOrigins)
+
 	InitDB()
 
-	// Solo ejecutar migraciones si se especifica
-	if os.Getenv("RUN_MIGRATIONS") == "true" {
-		if err := migrations.RunMigrations(DB); err != nil {
-			log.Fatal("Error en las migraciones:", err)
-		}
-
-		// Cargar datos iniciales solo si se resetea la DB
-		if os.Getenv("RESET_DB") == "true" {
-			_, err := GetStockAndStoreInDB()
-			if err != nil {
-				log.Fatal("Error cargando datos iniciales:", err)
-			}
-		}
-	}
+    // Conectar a Redis
+	redisClient := redis.NewClient(&redis.Options{
+		Addr: "localhost:6379",
+	})
 
 	r := gin.Default()
 
+    // Middlewares
     r.Use(CORSMiddleware())
 
-	// Crear y configurar WebSocket handler
-	wsHandler := NewWSHandler()
-	go wsHandler.run()
+    // Crear el handler de WebSocket (sin redis)
+	// wsHandler := NewWebSocketHandler()
+	// go wsHandler.handleMessages()
 
-	// Rutas existentes
+    // Crear el handler de WebSocket (sin redis)
+    wsHandler := NewWebSocketHandler(redisClient)
+	go wsHandler.subscribeStockUpdates()
+
+	// Routes
 	r.GET("/stocks", GetStocks)
 	r.PUT("/stocks", UpdateStocks)
 	r.GET("/stocks/:ticker", GetStockByTicker)
 	r.GET("/stocks/:ticker/history", GetStockPriceHistory)
 	r.GET("/stocks/recommendations", recommendStocks)
 	r.GET("/stocks/not-recommended", notRecommendedStocks)
-	r.GET("/stocks/ws", wsHandler.handleConnections)
 	r.GET("/stocks/search", SearchStocks)
 
-	// Iniciar el servicio de actualización con WebSocket
-	// startStockUpdateService(wsHandler)
+    // WebSocket routes
+	r.GET("/stocks/ws", wsHandler.handleConnections)
+
+	// Start massive stock simulation service
+	// StartMassiveStockSimulationService(wsHandler)
 
 	// Iniciar servidor
 	port := os.Getenv("PORT")
