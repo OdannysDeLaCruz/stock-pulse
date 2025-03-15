@@ -589,84 +589,95 @@ func UpdateStocks(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Base de datos actualizada correctamente"})
 }
 
-func recommendStocks(c *gin.Context) {
+func GetRecommendedStock(c *gin.Context) {
 	var stocks []Stock
-	DB.Where("rating_to = ?", "Buy").Find(&stocks)
 
-	validStocks := []Stock{}
-	now := time.Now()
-	cutoffTime := now.AddDate(0, -1, 0)
+    today := time.Now().UTC().Truncate(24 * time.Hour)
+
+	DB.Where("rating_to = ? AND target_to > target_from AND (action LIKE ? OR action LIKE ?) AND DATE(time AT TIME ZONE 'UTC') = ?",
+        "Buy", "%target raised by%", "%upgraded to%", today.Format("2006-01-02")).Find(&stocks)
+
+	var stockResponses []map[string]interface{}
 
 	for _, stock := range stocks {
-		stockTime, err := time.Parse(time.RFC3339, stock.Time)
-		if err == nil && stockTime.After(cutoffTime) {
-			// Convertir los valores de target eliminando el "$" y "," para calcular el potencial
-			// targetFromStr := strings.Trim(strings.ReplaceAll(stock.TargetFrom, ",", ""), "$")
-			// targetToStr := strings.Trim(strings.ReplaceAll(stock.TargetTo, ",", ""), "$")
+		var priceHistory []StockPriceHistory
+		DB.Where("ticker = ?", stock.Ticker).Order("timestamp DESC").Find(&priceHistory)
 
-			// targetFrom, _ := strconv.ParseFloat(targetFromStr, 64)
-			// targetTo, _ := strconv.ParseFloat(targetToStr, 64)
-
-			// Calcular el porcentaje de cambio potencial
-			// if targetFrom > 0 {
-			// 	// stock.ChangePct = ((targetTo - targetFrom) / targetFrom) * 100
-			// }
-
-			validStocks = append(validStocks, stock)
+		var priceHistoryMapped = make([]map[string]interface{}, 0)
+		for _, h := range priceHistory {
+			priceHistoryMapped = append(priceHistoryMapped, map[string]interface{}{
+				"timestamp":  h.Timestamp.Unix(),
+				"target_to":  h.TargetTo,
+				"target_from": h.TargetFrom,
+			})
 		}
+
+		log.Println(stock.Ticker)
+		log.Println(stock.TargetFrom, stock.TargetTo)
+		priceChange := CalculatePriceChange(stock.TargetFrom, stock.TargetTo)
+		log.Println(priceChange)
+		stockResponse := map[string]interface{}{
+			"id":            stock.ID,
+			"ticker":        stock.Ticker,
+			"company":       stock.Company,
+			"action":        stock.Action,
+			"brokerage":     stock.Brokerage,
+			"rating_from":   stock.RatingFrom,
+			"rating_to":     stock.RatingTo,
+			"time":          stock.Time,
+			"target_from":   stock.TargetFrom,
+			"target_to":     stock.TargetTo,
+			"price_history": priceHistoryMapped,
+			"analysis":      priceChange,
+		}
+
+		stockResponses = append(stockResponses, stockResponse)
 	}
 
-	// Ordenar por potencial de crecimiento (ChangePct) de mayor a menor
-	// sort.Slice(validStocks, func(i, j int) bool {
-	// 	return validStocks[i].ChangePct > validStocks[j].ChangePct
-	// })
-
-	// Limitar a los 5 primeros stocks
-	if len(validStocks) > 5 {
-		validStocks = validStocks[:5]
-	}
-
-	c.JSON(http.StatusOK, validStocks)
+	c.JSON(http.StatusOK, stockResponses)
 }
 
-func notRecommendedStocks(c *gin.Context) {
+func GetNoRecommendedStock(c *gin.Context) {
     var stocks []Stock
-    DB.Where("rating_to = ?", "Sell").Find(&stocks)
 
-    validStocks := []Stock{}
-    now := time.Now()
-    cutoffTime := now.AddDate(0, -1, 0) // Un mes atrás
+    today := time.Now().UTC().Truncate(24 * time.Hour)
+
+    DB.Where("rating_to = ? AND target_to < target_from AND (action LIKE ? OR action LIKE ?) AND DATE(time AT TIME ZONE 'UTC') = ?", 
+        "Sell", "%target lowered by%", "%downgraded to%", today.Format("2006-01-02")).Find(&stocks)
+
+    var stockResponses []map[string]interface{}
 
     for _, stock := range stocks {
-        stockTime, err := time.Parse(time.RFC3339, stock.Time)
-        if err == nil && stockTime.After(cutoffTime) {
-            // Convertir los valores de target eliminando el "$" y "," para calcular el potencial
-            // targetFromStr := strings.Trim(strings.ReplaceAll(stock.TargetFrom, ",", ""), "$")
-            // targetToStr := strings.Trim(strings.ReplaceAll(stock.TargetTo, ",", ""), "$")
+        var priceHistory []StockPriceHistory
+        DB.Where("ticker = ?", stock.Ticker).Order("timestamp DESC").Find(&priceHistory)
 
-            // targetFrom, _ := strconv.ParseFloat(targetFromStr, 64)
-            // targetTo, _ := strconv.ParseFloat(targetToStr, 64)
-
-            // Calcular el porcentaje de cambio potencial (negativo en este caso)
-            // if targetFrom > 0 {
-            //     // stock.ChangePct = ((targetTo - targetFrom) / targetFrom) * 100
-            // }
-
-            validStocks = append(validStocks, stock)
+        var priceHistoryMapped = make([]map[string]interface{}, 0)
+        for _, h := range priceHistory {
+            priceHistoryMapped = append(priceHistoryMapped, map[string]interface{}{
+                "timestamp": h.Timestamp.Unix(),
+                "target_to": h.TargetTo,
+                "target_from": h.TargetFrom,
+            })
         }
+
+        stockResponse := map[string]interface{}{
+            "id":           stock.ID,
+            "ticker":       stock.Ticker,
+            "company":      stock.Company,
+            "action":       stock.Action,
+            "brokerage":    stock.Brokerage,
+            "rating_from":  stock.RatingFrom,
+            "rating_to":    stock.RatingTo,
+            "time":         stock.Time,
+            "target_from":  stock.TargetFrom,
+            "target_to":    stock.TargetTo,
+            "price_history": priceHistoryMapped,
+        }
+
+        stockResponses = append(stockResponses, stockResponse)
     }
 
-    // Ordenar por potencial de pérdida (ChangePct) de menor a mayor
-    // sort.Slice(validStocks, func(i, j int) bool {
-        // return validStocks[i].ChangePct < validStocks[j].ChangePct
-    // })
-
-    // Limitar a los 5 stocks con mayor potencial de pérdida
-    if len(validStocks) > 5 {
-        validStocks = validStocks[:5]
-    }
-
-    c.JSON(http.StatusOK, validStocks)
+    c.JSON(http.StatusOK, stockResponses)
 }
 
 func SearchStocks(c *gin.Context) {
@@ -696,8 +707,41 @@ func SearchStocks(c *gin.Context) {
         return
     }
 
-    c.JSON(http.StatusOK, stocks)
+    var stockResponses []map[string]interface{}
+
+    for _, stock := range stocks {
+        var priceHistory []StockPriceHistory
+        DB.Where("ticker = ?", stock.Ticker).Order("timestamp DESC").Find(&priceHistory)
+
+        var priceHistoryMapped = make([]map[string]interface{}, 0)
+        for _, h := range priceHistory {
+            priceHistoryMapped = append(priceHistoryMapped, map[string]interface{}{
+                "timestamp": h.Timestamp.Unix(),
+                "target_to": h.TargetTo,
+                "target_from": h.TargetFrom,
+            })
+        }
+
+        stockResponse := map[string]interface{}{
+            "id":           stock.ID,
+            "ticker":       stock.Ticker,
+            "company":      stock.Company,
+            "action":       stock.Action,
+            "brokerage":    stock.Brokerage,
+            "rating_from":  stock.RatingFrom,
+            "rating_to":    stock.RatingTo,
+            "time":         stock.Time,
+            "target_from":  stock.TargetFrom,
+            "target_to":    stock.TargetTo,
+            "price_history": priceHistoryMapped,
+        }
+
+        stockResponses = append(stockResponses, stockResponse)
+    }
+
+    c.JSON(http.StatusOK, stockResponses)
 }
+
 
 // Middlewares
 
@@ -748,8 +792,8 @@ func main() {
 	r.PUT("/stocks", UpdateStocks)
 	r.GET("/stocks/:ticker", GetStockByTicker)
 	r.GET("/stocks/:ticker/history", GetStockPriceHistory)
-	r.GET("/stocks/recommendations", recommendStocks)
-	r.GET("/stocks/not-recommended", notRecommendedStocks)
+	r.GET("/stocks/recommendations", GetRecommendedStock)
+	r.GET("/stocks/not-recommended", GetNoRecommendedStock)
 	r.GET("/stocks/search", SearchStocks)
 
     // WebSocket routes
