@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 
 	"net/http"
 	"os"
@@ -422,6 +423,10 @@ func CalculatePriceChange(targetFrom, targetTo float64) map[string]interface{} {
     }
 }
 
+func roundToTwoDecimals(value float64) float64 {
+    return math.Round(value*100) / 100
+}
+
 // Handlers para las rutas
 
 func GetStocks(c *gin.Context) {
@@ -439,8 +444,8 @@ func GetStocks(c *gin.Context) {
         for _, h := range priceHistory {
             priceHistoryMapped = append(priceHistoryMapped, map[string]interface{}{
                 "timestamp": h.Timestamp.Unix(),
-                "target_to": h.TargetTo,
-                "target_from": h.TargetFrom,
+                "target_to": roundToTwoDecimals(h.TargetTo),
+                "target_from": roundToTwoDecimals(h.TargetFrom),
             })
         }
 
@@ -448,6 +453,8 @@ func GetStocks(c *gin.Context) {
         log.Println(stock.TargetFrom, stock.TargetTo)
         priceChange := CalculatePriceChange(stock.TargetFrom, stock.TargetTo)
         log.Println(priceChange)
+
+        // formatear a 2 decimales
         stockResponse := map[string]interface{}{
             "id":           stock.ID,
             "ticker":       stock.Ticker,
@@ -457,8 +464,8 @@ func GetStocks(c *gin.Context) {
             "rating_from":  stock.RatingFrom,
             "rating_to":    stock.RatingTo,
             "time":         stock.Time,
-            "target_from":  stock.TargetFrom,
-            "target_to":    stock.TargetTo,
+            "target_from":  roundToTwoDecimals(stock.TargetFrom),
+            "target_to":    roundToTwoDecimals(stock.TargetTo),
             "price_history": priceHistoryMapped,
             "analysis":      priceChange,
         }
@@ -504,8 +511,8 @@ func GetStockByTicker(c *gin.Context) {
     for _, h := range priceHistory {
         priceHistoryMapped = append(priceHistoryMapped, map[string]interface{}{
             "timestamp": h.Timestamp.Unix(),
-            "target_to": h.TargetTo,
-            "target_from": h.TargetFrom,
+            "target_to": roundToTwoDecimals(h.TargetTo),
+            "target_from": roundToTwoDecimals(h.TargetFrom),
         })
     }
 
@@ -521,8 +528,8 @@ func GetStockByTicker(c *gin.Context) {
         "rating_from":  stock.RatingFrom,
         "rating_to":    stock.RatingTo,
         "time":         stock.Time,
-        "target_from":  stock.TargetFrom,
-        "target_to":    stock.TargetTo,
+        "target_from":  roundToTwoDecimals(stock.TargetFrom),
+        "target_to":    roundToTwoDecimals(stock.TargetTo),
         "price_history": priceHistoryMapped,
         "analysis":      priceChange,
     }
@@ -570,8 +577,8 @@ func GetStockPriceHistory(c *gin.Context) {
     for _, h := range history {
         response = append(response, map[string]interface{}{
             "timestamp": h.Timestamp.Unix(),
-            "target_to": h.TargetTo,
-            "target_from": h.TargetFrom,
+            "target_to": roundToTwoDecimals(h.TargetTo),
+            "target_from": roundToTwoDecimals(h.TargetFrom),
         })
     }
 
@@ -607,8 +614,8 @@ func GetRecommendedStock(c *gin.Context) {
 		for _, h := range priceHistory {
 			priceHistoryMapped = append(priceHistoryMapped, map[string]interface{}{
 				"timestamp":  h.Timestamp.Unix(),
-				"target_to":  h.TargetTo,
-				"target_from": h.TargetFrom,
+				"target_to":  roundToTwoDecimals(h.TargetTo),
+				"target_from": roundToTwoDecimals(h.TargetFrom),
 			})
 		}
 
@@ -625,8 +632,8 @@ func GetRecommendedStock(c *gin.Context) {
 			"rating_from":   stock.RatingFrom,
 			"rating_to":     stock.RatingTo,
 			"time":          stock.Time,
-			"target_from":   stock.TargetFrom,
-			"target_to":     stock.TargetTo,
+			"target_from":   roundToTwoDecimals(stock.TargetFrom),
+			"target_to":     roundToTwoDecimals(stock.TargetTo),
 			"price_history": priceHistoryMapped,
 			"analysis":      priceChange,
 		}
@@ -655,8 +662,8 @@ func GetNoRecommendedStock(c *gin.Context) {
         for _, h := range priceHistory {
             priceHistoryMapped = append(priceHistoryMapped, map[string]interface{}{
                 "timestamp": h.Timestamp.Unix(),
-                "target_to": h.TargetTo,
-                "target_from": h.TargetFrom,
+                "target_to": roundToTwoDecimals(h.TargetTo),
+                "target_from": roundToTwoDecimals(h.TargetFrom),
             })
         }
 
@@ -669,8 +676,8 @@ func GetNoRecommendedStock(c *gin.Context) {
             "rating_from":  stock.RatingFrom,
             "rating_to":    stock.RatingTo,
             "time":         stock.Time,
-            "target_from":  stock.TargetFrom,
-            "target_to":    stock.TargetTo,
+            "target_from":  roundToTwoDecimals(stock.TargetFrom),
+            "target_to":    roundToTwoDecimals(stock.TargetTo),
             "price_history": priceHistoryMapped,
         }
 
@@ -717,8 +724,8 @@ func SearchStocks(c *gin.Context) {
         for _, h := range priceHistory {
             priceHistoryMapped = append(priceHistoryMapped, map[string]interface{}{
                 "timestamp": h.Timestamp.Unix(),
-                "target_to": h.TargetTo,
-                "target_from": h.TargetFrom,
+                "target_to": roundToTwoDecimals(h.TargetTo),
+                "target_from": roundToTwoDecimals(h.TargetFrom),
             })
         }
 
@@ -731,8 +738,8 @@ func SearchStocks(c *gin.Context) {
             "rating_from":  stock.RatingFrom,
             "rating_to":    stock.RatingTo,
             "time":         stock.Time,
-            "target_from":  stock.TargetFrom,
-            "target_to":    stock.TargetTo,
+            "target_from":  roundToTwoDecimals(stock.TargetFrom),
+            "target_to":    roundToTwoDecimals(stock.TargetTo),
             "price_history": priceHistoryMapped,
         }
 
