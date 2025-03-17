@@ -18,7 +18,7 @@ type Stock struct {
 	Brokerage   string `gorm:"column:brokerage;not null"`
 	RatingFrom  string `gorm:"column:rating_from;not null"`
 	RatingTo    string `gorm:"column:rating_to;not null"`
-	Time        string `gorm:"column:time;not null"`
+	Time        time.Time `gorm:"column:time;not null;type:timestamp"`
 }
 
 type StockPriceHistory struct {
@@ -27,7 +27,7 @@ type StockPriceHistory struct {
 	Ticker      string    `gorm:"index"`
 	TargetFrom  float64
 	TargetTo    float64
-	Timestamp   time.Time `gorm:"index"`
+	Time   		time.Time `gorm:"index;type:timestamp"`
 }
 
 func RunMigrations(db *gorm.DB) error {

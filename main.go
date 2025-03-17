@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"math"
+	"slices"
 
 	"net/http"
 	"os"
@@ -65,28 +66,36 @@ type Stock struct {
 	Brokerage   string `gorm:"column:brokerage;not null"`
 	RatingFrom  string `gorm:"column:rating_from;not null"`
 	RatingTo    string `gorm:"column:rating_to;not null"`
-	Time        string `gorm:"column:time;not null"`
+	Time        time.Time `gorm:"column:time;not null;type:timestamp"`
 
     // Relaciones
     PriceHistory []StockPriceHistory `gorm:"foreignKey:StockID;constraint:OnDelete:CASCADE" json:"price_history"`
 }
 
-type StockPartialRedis struct {
-    Ticker      string `json:"ticker"`
-    TargetFrom  float64 `json:"target_from"`
-    TargetTo    float64 `json:"target_to"`
-    RatingFrom  string    `json:"rating_from"`
+type NewItemPriceHistory struct {
+	TargetFrom  float64   `json:"target_from"`
+	TargetTo    float64   `json:"target_to"`
+	RatingFrom  string    `json:"rating_from"`
 	RatingTo    string    `json:"rating_to"`
-    Time        string `json:"time"`
+	Time        time.Time    `json:"time"`
+}
+type StockPartialRedis struct {
+	Ticker      string    `json:"ticker"`
+	TargetFrom  float64   `json:"target_from"`
+	TargetTo    float64   `json:"target_to"`
+	RatingFrom  string    `json:"rating_from"`
+	RatingTo    string    `json:"rating_to"`
+	NewItemPriceHistory NewItemPriceHistory `json:"new_item_price_history"`
+	Time        time.Time    `json:"time"`
 }
 
 type StockPriceHistory struct {
     gorm.Model
-    StockID     uint      `gorm:"index"`
-    Ticker      string    `gorm:"index" json:"ticker"`
+    StockID     uint    `gorm:"index"`
+    Ticker      string  `gorm:"index" json:"ticker"`
     TargetFrom  float64 `json:"target_from"`
     TargetTo    float64 `json:"target_to"`
-    Timestamp   time.Time `gorm:"index" json:"timestamp"`
+    Time        time.Time  `gorm:"index" json:"time"`
 }
 
 type StockResponseAPI struct {
@@ -185,16 +194,43 @@ func (w *WebSocketHandler) subscribeStockUpdates() {
         log.Println("🔹 Stock recibido:", msg.Payload)
 
 		var stock StockPartialRedis
-		json.Unmarshal([]byte(msg.Payload), &stock)
+		err = json.Unmarshal([]byte(msg.Payload), &stock)
+        if err != nil {
+			log.Println("Error al parsear stock:", err)
+			continue
+		}
 
 		// Guardar en base de datos antes de enviar a clientes
 		w.saveStockUpdate(stock)
+
+        priceChange := CalculatePriceChange(stock.TargetFrom, stock.TargetTo)
+
+        response := map[string]interface{}{
+			"ticker":      stock.Ticker,
+			"target_from": roundToTwoDecimals(stock.TargetFrom),
+			"target_to":   roundToTwoDecimals(stock.TargetTo),
+			"rating_from": stock.RatingFrom,
+			"rating_to":   stock.RatingTo,
+			"new_item_price_history": NewItemPriceHistory {
+                TargetFrom:  roundToTwoDecimals(stock.NewItemPriceHistory.TargetFrom),
+                TargetTo:    roundToTwoDecimals(stock.NewItemPriceHistory.TargetTo),
+                Time:        stock.NewItemPriceHistory.Time,
+            },
+            "analysis": priceChange,
+		}
+
+        // Convertir a JSON
+		customPayload, err := json.Marshal(response)
+		if err != nil {
+			log.Println("Error al serializar respuesta personalizada:", err)
+			continue
+		}
 
 		// Enviar datos solo a clientes suscritos a ese símbolo
 		w.mutex.Lock()
 		for client, subTicker := range w.clients {
 			if subTicker == stock.Ticker {
-				client.WriteMessage(websocket.TextMessage, []byte(msg.Payload))
+				client.WriteMessage(websocket.TextMessage, customPayload)
 			}
 		}
 		w.mutex.Unlock()
@@ -219,7 +255,7 @@ func (w *WebSocketHandler) saveStockUpdate(stockPartial StockPartialRedis) error
         existingStock.TargetTo    = stockPartial.TargetTo
         existingStock.RatingFrom  = stockPartial.RatingFrom
         existingStock.RatingTo    = stockPartial.RatingTo
-        existingStock.Time        = stockPartial.Time
+        existingStock.Time        = stockPartial.NewItemPriceHistory.Time.Truncate(time.Microsecond)
 
         if err := DB.Save(&existingStock).Error; err != nil {
             return err
@@ -231,7 +267,7 @@ func (w *WebSocketHandler) saveStockUpdate(stockPartial StockPartialRedis) error
             Ticker:      existingStock.Ticker,
             TargetFrom:  stockPartial.TargetFrom,
             TargetTo:    stockPartial.TargetTo,
-            Timestamp:   time.Now(),
+            Time:        stockPartial.NewItemPriceHistory.Time.Truncate(time.Microsecond),
         }
 
         if err := DB.Create(&priceHistory).Error; err != nil {
@@ -245,6 +281,7 @@ func (w *WebSocketHandler) saveStockUpdate(stockPartial StockPartialRedis) error
 // Convierte un string "$13.00" a float64
 func parsePrice(priceStr string) (float64, error) {
 	cleanStr := strings.Replace(priceStr, "$", "", 1) // Eliminar $
+	cleanStr = strings.Replace(cleanStr, ",", "", 1) // Eliminar ,
 	value, err := strconv.ParseFloat(cleanStr, 64)   // Convertir a float64
 	if err != nil {
         fmt.Println("Error al convertir el precio:", err)
@@ -308,6 +345,9 @@ func FetchStockData() ([]Stock, error) {
         var dataParsed []Stock = make([]Stock, len(response.Items))
 
         for i := range response.Items {
+            formattedTime, _ := time.Parse(time.RFC3339, response.Items[i].Time)
+
+
             dataParsed[i].Action = response.Items[i].Action
             dataParsed[i].Brokerage = response.Items[i].Brokerage
             dataParsed[i].Company = response.Items[i].Company
@@ -320,7 +360,7 @@ func FetchStockData() ([]Stock, error) {
             dataParsed[i].TargetFrom = targetFrom
             dataParsed[i].TargetTo = targetTo
             dataParsed[i].Ticker = response.Items[i].Ticker
-            dataParsed[i].Time = response.Items[i].Time
+            dataParsed[i].Time = formattedTime
         }
 
 		// Agregar los items a la lista total
@@ -361,7 +401,7 @@ func SaveStockData(stocks []Stock) error {
                     Brokerage:  stockData.Brokerage,
                     RatingFrom: stockData.RatingFrom,
                     RatingTo:   stockData.RatingTo,
-                    Time:       stockData.Time,
+                    Time:       stockData.Time.Truncate(time.Microsecond),
                 }
                 if err := DB.Create(&newStock).Error; err != nil {
                     return err
@@ -379,7 +419,7 @@ func SaveStockData(stocks []Stock) error {
             existingStock.Brokerage = stockData.Brokerage
             existingStock.RatingFrom = stockData.RatingFrom
             existingStock.RatingTo = stockData.RatingTo
-            existingStock.Time = stockData.Time
+            existingStock.Time = stockData.Time.Truncate(time.Microsecond)
 
             if err := DB.Save(&existingStock).Error; err != nil {
                 return err
@@ -412,8 +452,8 @@ func CalculatePriceChange(targetFrom, targetTo float64) map[string]interface{} {
         changePercentage := (changeValue / targetFrom) * 100
 
         return map[string]interface{}{
-            "change_value":      changeValue,
-            "change_percentage": changePercentage,
+            "change_value":      roundToTwoDecimals(changeValue),
+            "change_percentage": roundToTwoDecimals(changePercentage),
         }
     }
 
@@ -437,22 +477,21 @@ func GetStocks(c *gin.Context) {
 
     for _, stock := range stocks {
         var priceHistory []StockPriceHistory
-        DB.Where("ticker = ?", stock.Ticker).Order("timestamp DESC").Find(&priceHistory)
+        DB.Where("ticker = ?", stock.Ticker).Order("time DESC").Limit(10).Find(&priceHistory)
+
+        slices.Reverse(priceHistory)
 
         // Formatear datos para la gráfica
         var priceHistoryMapped = make([]map[string]interface{}, 0)
         for _, h := range priceHistory {
             priceHistoryMapped = append(priceHistoryMapped, map[string]interface{}{
-                "timestamp": h.Timestamp.Unix(),
+                "time": h.Time,
                 "target_to": roundToTwoDecimals(h.TargetTo),
                 "target_from": roundToTwoDecimals(h.TargetFrom),
             })
         }
 
-        log.Println(stock.Ticker)
-        log.Println(stock.TargetFrom, stock.TargetTo)
         priceChange := CalculatePriceChange(stock.TargetFrom, stock.TargetTo)
-        log.Println(priceChange)
 
         // formatear a 2 decimales
         stockResponse := map[string]interface{}{
@@ -497,7 +536,7 @@ func GetStockByTicker(c *gin.Context) {
     }
 
     var priceHistory []StockPriceHistory
-    result = DB.Where("ticker = ?", stock.Ticker).Order("timestamp DESC").Find(&priceHistory)
+    result = DB.Where("ticker = ?", stock.Ticker).Order("time ASC").Limit(10).Find(&priceHistory)
 
     if result.Error != nil {
         c.JSON(http.StatusInternalServerError, gin.H{
@@ -510,7 +549,7 @@ func GetStockByTicker(c *gin.Context) {
     var priceHistoryMapped = make([]map[string]interface{}, 0)
     for _, h := range priceHistory {
         priceHistoryMapped = append(priceHistoryMapped, map[string]interface{}{
-            "timestamp": h.Timestamp.Unix(),
+            "time": h.Time,
             "target_to": roundToTwoDecimals(h.TargetTo),
             "target_from": roundToTwoDecimals(h.TargetFrom),
         })
@@ -562,9 +601,9 @@ func GetStockPriceHistory(c *gin.Context) {
     }
 
     var history []StockPriceHistory
-    result := DB.Where("ticker = ? AND timestamp BETWEEN ? AND ?",
+    result := DB.Where("ticker = ? AND time BETWEEN ? AND ?",
         ticker, startTime, endTime).
-        Order("timestamp ASC").
+        Order("time ASC").
         Find(&history)
 
     if result.Error != nil {
@@ -576,7 +615,7 @@ func GetStockPriceHistory(c *gin.Context) {
     var response []map[string]interface{}
     for _, h := range history {
         response = append(response, map[string]interface{}{
-            "timestamp": h.Timestamp.Unix(),
+            "time": h.Time,
             "target_to": roundToTwoDecimals(h.TargetTo),
             "target_from": roundToTwoDecimals(h.TargetFrom),
         })
@@ -599,7 +638,8 @@ func UpdateStocks(c *gin.Context) {
 func GetRecommendedStock(c *gin.Context) {
 	var stocks []Stock
 
-    today := time.Now().UTC().Truncate(24 * time.Hour)
+    today := time.Now().Truncate(24 * time.Hour)
+    log.Println("Fecha de hoy en UTC:", today.Format("2006-01-02"))
 
 	DB.Where("rating_to = ? AND target_to > target_from AND (action LIKE ? OR action LIKE ?) AND DATE(time AT TIME ZONE 'UTC') = ?",
         "Buy", "%target raised by%", "%upgraded to%", today.Format("2006-01-02")).Find(&stocks)
@@ -608,12 +648,12 @@ func GetRecommendedStock(c *gin.Context) {
 
 	for _, stock := range stocks {
 		var priceHistory []StockPriceHistory
-		DB.Where("ticker = ?", stock.Ticker).Order("timestamp DESC").Find(&priceHistory)
+		DB.Where("ticker = ?", stock.Ticker).Order("time ASC").Limit(10).Find(&priceHistory)
 
 		var priceHistoryMapped = make([]map[string]interface{}, 0)
 		for _, h := range priceHistory {
 			priceHistoryMapped = append(priceHistoryMapped, map[string]interface{}{
-				"timestamp":  h.Timestamp.Unix(),
+				"time":  h.Time,
 				"target_to":  roundToTwoDecimals(h.TargetTo),
 				"target_from": roundToTwoDecimals(h.TargetFrom),
 			})
@@ -656,12 +696,12 @@ func GetNoRecommendedStock(c *gin.Context) {
 
     for _, stock := range stocks {
         var priceHistory []StockPriceHistory
-        DB.Where("ticker = ?", stock.Ticker).Order("timestamp DESC").Find(&priceHistory)
+        DB.Where("ticker = ?", stock.Ticker).Order("times ASC").Limit(10).Find(&priceHistory)
 
         var priceHistoryMapped = make([]map[string]interface{}, 0)
         for _, h := range priceHistory {
             priceHistoryMapped = append(priceHistoryMapped, map[string]interface{}{
-                "timestamp": h.Timestamp.Unix(),
+                "time": h.Time,
                 "target_to": roundToTwoDecimals(h.TargetTo),
                 "target_from": roundToTwoDecimals(h.TargetFrom),
             })
@@ -718,12 +758,12 @@ func SearchStocks(c *gin.Context) {
 
     for _, stock := range stocks {
         var priceHistory []StockPriceHistory
-        DB.Where("ticker = ?", stock.Ticker).Order("timestamp DESC").Find(&priceHistory)
+        DB.Where("ticker = ?", stock.Ticker).Order("times ASC").Limit(10).Find(&priceHistory)
 
         var priceHistoryMapped = make([]map[string]interface{}, 0)
         for _, h := range priceHistory {
             priceHistoryMapped = append(priceHistoryMapped, map[string]interface{}{
-                "timestamp": h.Timestamp.Unix(),
+                "time": h.Time,
                 "target_to": roundToTwoDecimals(h.TargetTo),
                 "target_from": roundToTwoDecimals(h.TargetFrom),
             })
