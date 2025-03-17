@@ -2,23 +2,19 @@ package main
 
 import (
 	"log"
-	"os"
 
+	"github.com/OdannysDeLaCruz/stock-tracker/config"
 	"github.com/OdannysDeLaCruz/stock-tracker/migrations"
-	"github.com/joho/godotenv"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
 func main() {
-	// Cargar variables de entorno
-	if err := godotenv.Load(); err != nil {
-		log.Fatal("Error cargando el archivo .env")
-	}
+	cfg := config.LoadConfig()
+
 
 	// Conectar a la base de datos
-	dsn := os.Getenv("DATABASE_URL")
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	db, err := gorm.Open(postgres.Open(cfg.DatabaseURL), &gorm.Config{})
 	if err != nil {
 		log.Fatal("No se pudo conectar a la base de datos:", err)
 	}
@@ -29,4 +25,4 @@ func main() {
 	}
 
 	log.Println("Migraciones completadas exitosamente")
-} 
+}
