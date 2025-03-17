@@ -10,7 +10,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-type NewItemPriceHistory struct {
+type NewItemStockPriceHistory struct {
 	TargetFrom  float64   `json:"target_from"`
 	TargetTo    float64   `json:"target_to"`
 	RatingFrom  string    `json:"rating_from"`
@@ -23,7 +23,7 @@ type StockPartialRedis struct {
 	TargetTo    float64   `json:"target_to"`
 	RatingFrom  string    `json:"rating_from"`
 	RatingTo    string    `json:"rating_to"`
-	NewItemPriceHistory NewItemPriceHistory `json:"new_item_price_history"`
+	NewItemStockPriceHistory NewItemStockPriceHistory `json:"new_item_price_history"`
 }
 
 func main() {
@@ -36,7 +36,7 @@ func main() {
 	defer ticker.Stop()
 
 	// Lista de acciones simuladas
-	stocksTicker := []string{"AKBA"}
+	stocksTicker := []string{"NVDA"}
 	ratingList := []string{"Buy", "Hold", "Sell", "Strong-Buy", "Strong-Sell", "Neutral", "Overweight", "Underweight", "Outperform", "Underperform"}
 
 	for {
@@ -55,7 +55,7 @@ func main() {
 		dateUTC := time.Now().UTC()
 		time := dateUTC.Format(dateFormat)
 
-		newItemPriceHistory := NewItemPriceHistory{
+		newItemStockPriceHistory := NewItemStockPriceHistory{
 			TargetFrom: targetFrom,
 			TargetTo:   targetTo,
 			RatingFrom: ratingFrom,
@@ -69,7 +69,7 @@ func main() {
 			TargetTo:   targetTo,
 			RatingFrom: ratingFrom,
 			RatingTo:  	ratingTo,
-			NewItemPriceHistory: newItemPriceHistory,
+			NewItemStockPriceHistory: newItemStockPriceHistory,
 		}
 
 		// Publicar en Redis
