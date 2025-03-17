@@ -3,8 +3,8 @@ package application
 import (
 	"time"
 
-	"github.com/OdannysDeLaCruz/stock-tracker/internal/domain/stock"
-	"github.com/OdannysDeLaCruz/stock-tracker/pkg"
+	"github.com/OdannysDeLaCruz/stock-pulse/internal/domain/stock"
+	"github.com/OdannysDeLaCruz/stock-pulse/pkg"
 )
 
 // stockService implementa stock.StockService

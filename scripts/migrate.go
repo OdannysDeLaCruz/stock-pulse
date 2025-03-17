@@ -3,8 +3,8 @@ package main
 import (
 	"log"
 
-	"github.com/OdannysDeLaCruz/stock-tracker/config"
-	"github.com/OdannysDeLaCruz/stock-tracker/migrations"
+	"github.com/OdannysDeLaCruz/stock-pulse/config"
+	"github.com/OdannysDeLaCruz/stock-pulse/migrations"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )

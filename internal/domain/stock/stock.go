@@ -3,7 +3,7 @@ package stock
 import (
 	"time"
 
-	"github.com/OdannysDeLaCruz/stock-tracker/internal/domain/price_history"
+	"github.com/OdannysDeLaCruz/stock-pulse/internal/domain/price_history"
 	"gorm.io/gorm"
 )
 

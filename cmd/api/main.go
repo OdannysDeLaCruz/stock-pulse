@@ -3,11 +3,11 @@ package main
 import (
 	"log"
 
-	"github.com/OdannysDeLaCruz/stock-tracker/config"
-	"github.com/OdannysDeLaCruz/stock-tracker/internal/application"
-	"github.com/OdannysDeLaCruz/stock-tracker/internal/delivery"
-	"github.com/OdannysDeLaCruz/stock-tracker/internal/repository"
-	"github.com/OdannysDeLaCruz/stock-tracker/pkg"
+	"github.com/OdannysDeLaCruz/stock-pulse/config"
+	"github.com/OdannysDeLaCruz/stock-pulse/internal/application"
+	"github.com/OdannysDeLaCruz/stock-pulse/internal/delivery"
+	"github.com/OdannysDeLaCruz/stock-pulse/internal/repository"
+	"github.com/OdannysDeLaCruz/stock-pulse/pkg"
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/driver/postgres"

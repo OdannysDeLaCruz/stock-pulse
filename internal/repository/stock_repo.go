@@ -4,8 +4,8 @@ import (
 	"errors"
 	"time"
 
-	"github.com/OdannysDeLaCruz/stock-tracker/internal/domain/stock"
-	"github.com/OdannysDeLaCruz/stock-tracker/internal/domain/price_history"
+	"github.com/OdannysDeLaCruz/stock-pulse/internal/domain/price_history"
+	"github.com/OdannysDeLaCruz/stock-pulse/internal/domain/stock"
 	"gorm.io/gorm"
 )
 

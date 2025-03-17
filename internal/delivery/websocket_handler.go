@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/OdannysDeLaCruz/stock-tracker/config"
-	"github.com/OdannysDeLaCruz/stock-tracker/internal/domain/stock"
-	"github.com/OdannysDeLaCruz/stock-tracker/internal/domain/price_history"
+	"github.com/OdannysDeLaCruz/stock-pulse/config"
+	"github.com/OdannysDeLaCruz/stock-pulse/internal/domain/price_history"
+	"github.com/OdannysDeLaCruz/stock-pulse/internal/domain/stock"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"github.com/redis/go-redis/v9"

@@ -1,4 +1,4 @@
-module github.com/OdannysDeLaCruz/stock-tracker
+module github.com/OdannysDeLaCruz/stock-pulse
 
 go 1.23.2
 
