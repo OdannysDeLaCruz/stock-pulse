@@ -8,7 +8,7 @@ import (
 
 // StockRepository define las operaciones que debe soportar cualquier implementación de almacenamiento
 type StockRepository interface {
-	FindAll() ([]Stock, error)
+	FindAll(page, limit int) ([]Stock, error)
 	FindByTicker(ticker string) (*Stock, error)
 	FindStockHistory(ticker string, startTime, endTime time.Time) ([]price_history.StockPriceHistory, error)
 	FindRecommendedStocks() ([]Stock, error)

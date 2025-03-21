@@ -3,6 +3,7 @@ package delivery
 import (
 	"log"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/OdannysDeLaCruz/stock-pulse/internal/domain/stock"
@@ -27,7 +28,10 @@ func NewStockHandler(router *gin.Engine, stockService stock.StockService) {
 }
 
 func (h *StockHandler) GetStocks(c *gin.Context) {
-	stocks, err := h.stockService.GetAllStocks()
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "15"))
+
+	stocks, err := h.stockService.GetAllStocks(page, limit)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error obteniendo stocks"})
 		return

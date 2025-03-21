@@ -17,16 +17,31 @@ func NewStockService(stockRepo stock.StockRepository) stock.StockService {
 	return &stockService{stockRepo}
 }
 
-func (s *stockService) GetAllStocks() ([]map[string]interface{}, error) {
-	stocks, err := s.stockRepo.FindAll()
+func (s *stockService) GetAllStocks(page, limit int) ([]map[string]interface{}, error) {
+	// Validar límites (máximo 15 stocks por página)
+	if limit <= 0 || limit > 15 {
+		limit = 15
+	}
+	if page < 1 {
+		page = 1
+	}
+
+	stocks, err := s.stockRepo.FindAll(page, limit)
 	if err != nil {
 		return nil, err
 	}
 	// Mapear los resultados a JSON
 	var stockResponses []map[string]interface{}
 	for _, stock := range stocks {
-		var StockPriceHistoryMapped []map[string]interface{}
-		for _, h := range stock.PriceHistory {
+		var StockPriceHistoryMapped []map[string]interface{} = make([]map[string]interface{}, 0)
+
+		historyLen := len(stock.PriceHistory)
+		startIdx := 0
+		if historyLen > 10 {
+			startIdx = historyLen - 10
+		}
+
+		for _, h := range stock.PriceHistory[startIdx:] {
 			StockPriceHistoryMapped = append(StockPriceHistoryMapped, map[string]interface{}{
 				"time":        h.Time,
 				"target_to":   pkg.RoundToTwoDecimals(h.TargetTo),
@@ -63,8 +78,15 @@ func (s *stockService) GetStockByTicker(ticker string) (map[string]interface{}, 
 	}
 
 	// Mapear los resultados a JSON
-	var StockPriceHistoryMapped []map[string]interface{}
-	for _, h := range stock.PriceHistory {
+	var StockPriceHistoryMapped []map[string]interface{} = make([]map[string]interface{}, 0)
+
+	historyLen := len(stock.PriceHistory)
+		startIdx := 0
+		if historyLen > 10 {
+			startIdx = historyLen - 10
+		}
+
+		for _, h := range stock.PriceHistory[startIdx:] {
 		StockPriceHistoryMapped = append(StockPriceHistoryMapped, map[string]interface{}{
 			"time":        h.Time,
 			"target_to":   pkg.RoundToTwoDecimals(h.TargetTo),
@@ -84,6 +106,7 @@ func (s *stockService) GetStockByTicker(ticker string) (map[string]interface{}, 
 		"target_from":   pkg.RoundToTwoDecimals(stock.TargetFrom),
 		"target_to":     pkg.RoundToTwoDecimals(stock.TargetTo),
 		"price_history": StockPriceHistoryMapped,
+		"analysis":      s.CalculatePriceChange(stock.TargetFrom, stock.TargetTo),
 	}
 
 
@@ -130,8 +153,15 @@ func (s *stockService) GetRecommendedStocks() ([]map[string]interface{}, error) 
 	// Mapear los resultados a JSON
 	var stockResponses []map[string]interface{}
 	for _, stock := range stocks {
-		var StockPriceHistoryMapped []map[string]interface{}
-		for _, h := range stock.PriceHistory {
+		var StockPriceHistoryMapped []map[string]interface{} = make([]map[string]interface{}, 0)
+
+		historyLen := len(stock.PriceHistory)
+		startIdx := 0
+		if historyLen > 10 {
+			startIdx = historyLen - 10
+		}
+
+		for _, h := range stock.PriceHistory[startIdx:] {
 			StockPriceHistoryMapped = append(StockPriceHistoryMapped, map[string]interface{}{
 				"time":        h.Time,
 				"target_to":   pkg.RoundToTwoDecimals(h.TargetTo),
@@ -151,6 +181,7 @@ func (s *stockService) GetRecommendedStocks() ([]map[string]interface{}, error) 
 			"target_from":   pkg.RoundToTwoDecimals(stock.TargetFrom),
 			"target_to":     pkg.RoundToTwoDecimals(stock.TargetTo),
 			"price_history": StockPriceHistoryMapped,
+			"analysis":      s.CalculatePriceChange(stock.TargetFrom, stock.TargetTo),
 		}
 
 		stockResponses = append(stockResponses, stockResponse)
@@ -168,8 +199,15 @@ func (s *stockService) GetNoRecommendedStocks() ([]map[string]interface{}, error
 	// Mapear los resultados a JSON
 	var stockResponses []map[string]interface{}
 	for _, stock := range stocks {
-		var StockPriceHistoryMapped []map[string]interface{}
-		for _, h := range stock.PriceHistory {
+		var StockPriceHistoryMapped []map[string]interface{} = make([]map[string]interface{}, 0)
+
+		historyLen := len(stock.PriceHistory)
+		startIdx := 0
+		if historyLen > 10 {
+			startIdx = historyLen - 10
+		}
+
+		for _, h := range stock.PriceHistory[startIdx:] {
 			StockPriceHistoryMapped = append(StockPriceHistoryMapped, map[string]interface{}{
 				"time":        h.Time,
 				"target_to":   pkg.RoundToTwoDecimals(h.TargetTo),
@@ -189,6 +227,7 @@ func (s *stockService) GetNoRecommendedStocks() ([]map[string]interface{}, error
 			"target_from":   pkg.RoundToTwoDecimals(stock.TargetFrom),
 			"target_to":     pkg.RoundToTwoDecimals(stock.TargetTo),
 			"price_history": StockPriceHistoryMapped,
+			"analysis":      s.CalculatePriceChange(stock.TargetFrom, stock.TargetTo),
 		}
 
 		stockResponses = append(stockResponses, stockResponse)
@@ -207,8 +246,15 @@ func (s *stockService) SearchStocks(query string) ([]map[string]interface{}, err
 	// Mapear los resultados a JSON
 	var stockResponses []map[string]interface{}
 	for _, stock := range stocks {
-		var StockPriceHistoryMapped []map[string]interface{}
-		for _, h := range stock.PriceHistory {
+		var StockPriceHistoryMapped []map[string]interface{} = make([]map[string]interface{}, 0)
+	
+		historyLen := len(stock.PriceHistory)
+		startIdx := 0
+		if historyLen > 10 {
+			startIdx = historyLen - 10
+		}
+
+		for _, h := range stock.PriceHistory[startIdx:] {
 			StockPriceHistoryMapped = append(StockPriceHistoryMapped, map[string]interface{}{
 				"time":        h.Time,
 				"target_to":   pkg.RoundToTwoDecimals(h.TargetTo),
@@ -228,6 +274,7 @@ func (s *stockService) SearchStocks(query string) ([]map[string]interface{}, err
 			"target_from":   pkg.RoundToTwoDecimals(stock.TargetFrom),
 			"target_to":     pkg.RoundToTwoDecimals(stock.TargetTo),
 			"price_history": StockPriceHistoryMapped,
+			"analysis":      s.CalculatePriceChange(stock.TargetFrom, stock.TargetTo),
 		}
 
 		stockResponses = append(stockResponses, stockResponse)
