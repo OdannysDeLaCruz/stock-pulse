@@ -1,0 +1,59 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:6.2.7-alpine
+    container_name: redis
+    restart: always
+    ports:
+      - "6379:6379"
+
+  redis-labs:
+    image: rediscommander/redis-commander:latest
+    container_name: redis-labs
+    restart: always
+    ports:
+      - "8081:8081"
+    environment:
+      - REDIS_HOSTS=redis
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+  cockroachdb:
+    image: cockroachdb/cockroach:v23.1.0
+    container_name: cockroachdb_local
+    command: start-single-node --insecure
+    ports:
+      - "26257:26257"  # Puerto para la conexión con el cliente
+      - "8080:8080"    # Puerto de la UI de administración
+    volumes:
+      - cockroach-data:/cockroach/cockroach-data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "cockroach", "node", "status", "--insecure"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  db-init:
+    image: cockroachdb/cockroach:v23.1.0
+    depends_on:
+      - cockroachdb
+    entrypoint: ["/bin/sh", "-c", "sleep 5 && cockroach sql --insecure --host=cockroachdb -e 'CREATE DATABASE IF NOT EXISTS stocks_tracker_db;'" ]
+
+  stock-tracker:
+    build: .
+    container_name: stock-tracker
+    restart: always
+    ports:
+      - "8082:8082"
+    environment:
+      - DB_HOST=cockroachdb
+      - DB_PORT=26257
+    depends_on:
+      - redis
+      - cockroachdb:
+        condition: service_healthy
+    volumes:
+      - ./.env:/root/.env
+volumes:
+  cockroach-data:
