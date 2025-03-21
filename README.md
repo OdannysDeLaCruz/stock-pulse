@@ -57,7 +57,7 @@ $ cd stock-pulse
 $ cp .env.example .env
 ```
 
-El nombre de la base de datos es el nombre del servicio `cockroachdb`, o el nombre que le quieras configurar al servicio. Pasa lo mismo con redis, se debe usar el nombre del servicio configurado en el docker-compose.yml, en este caso es `redis`. El `user` y `dbname` de la base de datos será los de tu base de datos.
+El nombre de la base de datos es el nombre del servicio `cockroachdb`, o el nombre que le quieras configurar al servicio. Pasa lo mismo con redis, se debe usar el nombre del servicio configurado en el docker-compose.yml, en este caso es `redis`. El `user`, `dbname` y el `port` serán los que configuras al crear la base de datos desde `docker-compose.yml` en el servicio `db-init`. En nuestro caso, usaremos `user=root`, `dbname=stocks_pulse_db` y el puerto por defecto de la base de datos `cockroachdb` que es `port=26257`.
 
 #### 3️⃣ Levantar entorno con Docker
 
