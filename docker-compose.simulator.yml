@@ -1,0 +1,9 @@
+services:
+  simulator:
+    build:
+      context: .
+      dockerfile: Dockerfile.simulator
+    container_name: simulator
+    restart: no
+    volumes:
+      - ./.env:/root/.env
