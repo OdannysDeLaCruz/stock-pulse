@@ -15,5 +15,6 @@ type StockRepository interface {
 	FindNoRecommendedStocks() ([]Stock, error)
 	SearchStocks(query string) ([]Stock, error)
 	Save(stock *Stock) error
+	Upsert(stocks []Stock) error
 	Update(stock *Stock) error
 }

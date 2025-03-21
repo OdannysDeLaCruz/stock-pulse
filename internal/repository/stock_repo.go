@@ -2,6 +2,7 @@ package repository
 
 import (
 	"errors"
+	"fmt"
 	"log"
 	"time"
 
@@ -155,6 +156,53 @@ func (r *stockRepository) SearchStocks(query string) ([]stock.Stock, error) {
 
 func (r *stockRepository) Save(stock *stock.Stock) error {
 	return r.db.Save(stock).Error
+}
+
+func (r *stockRepository) Upsert(stocks []stock.Stock) error {
+	for _, stockData := range stocks {
+		existingStock := stock.Stock{}
+		result := r.db.Where("ticker = ?", stockData.Ticker).First(&existingStock)
+
+        if result.Error != nil {
+            if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+                // No se encontró ningún registro con ese ticker
+                // Insertar uno nuevo
+                newStock := stock.Stock{
+                    Ticker:     stockData.Ticker,
+                    TargetFrom: stockData.TargetFrom,
+                    TargetTo:   stockData.TargetTo,
+                    Company:    stockData.Company,
+                    Action:     stockData.Action,
+                    Brokerage:  stockData.Brokerage,
+                    RatingFrom: stockData.RatingFrom,
+                    RatingTo:   stockData.RatingTo,
+                    Time:       stockData.Time.Truncate(time.Microsecond),
+                }
+                if err := r.db.Create(&newStock).Error; err != nil {
+                    return err
+                }
+            } else {
+                fmt.Println("Error en la consulta:", result.Error)
+                return result.Error
+            }
+        } else {
+            // Actualizar el registro existente
+            existingStock.TargetFrom = stockData.TargetFrom
+            existingStock.TargetTo = stockData.TargetTo
+            existingStock.Company = stockData.Company
+            existingStock.Action = stockData.Action
+            existingStock.Brokerage = stockData.Brokerage
+            existingStock.RatingFrom = stockData.RatingFrom
+            existingStock.RatingTo = stockData.RatingTo
+            existingStock.Time = stockData.Time.Truncate(time.Microsecond)
+
+            if err := r.db.Save(&existingStock).Error; err != nil {
+                return err
+            }
+		}
+	}
+
+	return nil
 }
 
 func (r *stockRepository) Update(stock *stock.Stock) error {
