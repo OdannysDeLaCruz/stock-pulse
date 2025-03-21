@@ -1,4 +1,6 @@
-<div style="text-align:center"><img src="https://superbeauty-public.s3.us-east-1.amazonaws.com/images/stocks-pulse.jpg" /></div>
+<p align="center" width="100%">
+  <img src="https://superbeauty-public.s3.us-east-1.amazonaws.com/images/stocks-pulse.jpg" />
+</p>
 
 # 📈 Stocks Pulse - Real-Time Stock Monitoring
 
