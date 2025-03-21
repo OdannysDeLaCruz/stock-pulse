@@ -10,11 +10,15 @@ import (
 // stockService implementa stock.StockService
 type stockService struct {
 	stockRepo stock.StockRepository
+	stockExternalRepo stock.StockExternalRepository
 }
 
 // NewStockService devuelve una nueva instancia de StockService
-func NewStockService(stockRepo stock.StockRepository) stock.StockService {
-	return &stockService{stockRepo}
+func NewStockService(stockRepo stock.StockRepository, stockExternalRepo stock.StockExternalRepository) stock.StockService {
+	return &stockService{
+		stockRepo,
+		stockExternalRepo,
+	}
 }
 
 func (s *stockService) GetAllStocks(page, limit int) ([]map[string]interface{}, error) {
@@ -284,7 +288,16 @@ func (s *stockService) SearchStocks(query string) ([]map[string]interface{}, err
 }
 
 func (s *stockService) UpdateStockData() error {
-	// Aquí puedes implementar la lógica para actualizar datos desde una API externa
+	stocks, err := s.stockExternalRepo.FetchData()
+	if err != nil {
+		return err
+	}
+
+	err = s.stockRepo.Upsert(stocks)
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 

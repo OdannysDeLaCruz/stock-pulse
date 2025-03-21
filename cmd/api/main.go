@@ -29,8 +29,9 @@ func main() {
 
 	// Inyectar dependencias
 	stockRepo := repository.NewStockRepository(db)
+	stockExternalRepo := repository.NewStockExternalRepository(db)
 	StockPriceHistoryRepo := repository.NewStockPriceHistoryRepository(db)
-	stockService := application.NewStockService(stockRepo)
+	stockService := application.NewStockService(stockRepo, stockExternalRepo)
 	StockPriceHistoryService := application.NewStockPriceHistoryService(StockPriceHistoryRepo)
 
 	// Iniciar servidor
