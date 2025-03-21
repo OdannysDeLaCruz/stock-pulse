@@ -11,6 +11,7 @@ import (
 	"github.com/OdannysDeLaCruz/stock-pulse/config"
 	"github.com/OdannysDeLaCruz/stock-pulse/internal/domain/price_history"
 	"github.com/OdannysDeLaCruz/stock-pulse/internal/domain/stock"
+	"github.com/OdannysDeLaCruz/stock-pulse/pkg"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"github.com/redis/go-redis/v9"
@@ -114,11 +115,34 @@ func (w *WebSocketHandler) subscribeStockUpdates() {
 			continue
 		}
 
+		priceChange := w.stockService.CalculatePriceChange(stock.TargetFrom, stock.TargetTo)
+
+        response := map[string]interface{}{
+			"ticker":      stock.Ticker,
+			"target_from": pkg.RoundToTwoDecimals(stock.TargetFrom),
+			"target_to":   pkg.RoundToTwoDecimals(stock.TargetTo),
+			"rating_from": stock.RatingFrom,
+			"rating_to":   stock.RatingTo,
+			"new_item_price_history": price_history.StockPriceHistory {
+                TargetFrom:  pkg.RoundToTwoDecimals(stock.NewItemStockPriceHistory.TargetFrom),
+                TargetTo:    pkg.RoundToTwoDecimals(stock.NewItemStockPriceHistory.TargetTo),
+                Time:        stock.NewItemStockPriceHistory.Time,
+            },
+            "analysis": priceChange,
+		}
+
+		// Convertir a JSON
+		customPayload, err := json.Marshal(response)
+		if err != nil {
+			log.Println("Error al serializar respuesta personalizada:", err)
+			continue
+		}
+
 		// Enviar solo a los clientes suscritos al ticker del stock
 		w.mutex.Lock()
 		for client, subTicker := range w.clients {
 			if subTicker == stock.Ticker {
-				client.WriteJSON(stock)
+				client.WriteMessage(websocket.TextMessage, customPayload)
 			}
 		}
 		w.mutex.Unlock()
