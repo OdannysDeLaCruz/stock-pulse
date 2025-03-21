@@ -1,0 +1,11 @@
+services:
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile.migrate
+    container_name: migrate
+    restart: no
+    volumes:
+      - ./.env:/root/.env
+volumes:
+  cockroach-data:
