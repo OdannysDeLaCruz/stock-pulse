@@ -1,4 +1,4 @@
-![Logo](https://superbeauty-public.s3.us-east-1.amazonaws.com/images/stockpulse.webp)
+![Logo](https://superbeauty-public.s3.us-east-1.amazonaws.com/images/stocks-pulse.jpg)
 
 # 📈 Stocks Pulse - Real-Time Stock Monitoring
 
