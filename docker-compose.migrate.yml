@@ -7,5 +7,3 @@ services:
     restart: no
     volumes:
       - ./.env:/root/.env
-volumes:
-  cockroach-data:
