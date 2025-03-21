@@ -28,7 +28,7 @@ type StockPartialRedis struct {
 
 func main() {
 	redisClient := redis.NewClient(&redis.Options{
-		Addr: "localhost:6379",
+		Addr: "redis:6379",
 	})
 	ctx := context.Background()
 
