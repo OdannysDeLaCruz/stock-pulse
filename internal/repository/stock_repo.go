@@ -21,21 +21,35 @@ func NewStockRepository(db *gorm.DB) stock.StockRepository {
 
 func (r *stockRepository) FindAll(page, limit int) ([]stock.Stock, error) {
 	var stocks []stock.Stock
-	offset := (page - 1) * limit
+	// offset := (page - 1) * limit
 
-	err := r.db.Preload("PriceHistory", func(db *gorm.DB) *gorm.DB {
-		return db.Order("time ASC").Limit(10)
-	}).
-		Order("time DESC").
-		Limit(limit).
-		Offset(offset).
-		Find(&stocks).Error
+	// err := r.db.
+	// 	Select("stocks.*, stock_price_histories.*").
+	// 	Joins("LEFT JOIN stock_price_histories ON stock_price_histories.stock_id = stocks.id").
+	// 	// Order("stock_price_histories.time ASC").
+	// 	// Limit(10).
+	// 	Order("stocks.created_at").
+	// 	Limit(limit).
+	// 	// Offset(offset).
+	// 	Find(&stocks).Error
+	
+	err := r.db.Table("stocks").Preload("PriceHistory").Find(&stocks).Error
+		// Select("stocks.*, stock_price_histories.*").
+		// Joins("left join stock_price_histories on stock_price_histories.stock_id = stocks.id").
+		// Order("stock_price_histories.time ASC").
+		// Limit(10).
+		// Order("stocks.created_at").
+		// Limit(limit).
+		// Offset(offset).
+		// Scan(&stocks).Error
+
+	// log.Println("Stocks:", stocks)
 
 	if err != nil {
 		return nil, err
 	}
 
-	return stocks, err
+	return stocks, nil
 }
 
 func (r *stockRepository) FindByTicker(ticker string) (*stock.Stock, error) {

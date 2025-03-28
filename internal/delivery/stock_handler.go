@@ -56,7 +56,7 @@ func (h *StockHandler) GetStockByTicker(c *gin.Context) {
 // Obtener historial de precios
 func (h *StockHandler) GetStockPriceHistory(c *gin.Context) {
 	ticker := c.Param("ticker")
-	period := c.DefaultQuery("period", "1d")
+	period := c.DefaultQuery("period", "1y")
 
 	startTime, endTime := calculateTimeRange(period)
 

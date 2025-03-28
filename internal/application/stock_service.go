@@ -1,6 +1,8 @@
 package application
 
 import (
+	// "log"
+	"sort"
 	"time"
 
 	"github.com/OdannysDeLaCruz/stock-pulse/internal/domain/stock"
@@ -38,7 +40,10 @@ func (s *stockService) GetAllStocks(page, limit int) ([]map[string]interface{}, 
 	var stockResponses []map[string]interface{}
 	for _, stock := range stocks {
 		var StockPriceHistoryMapped []map[string]interface{} = make([]map[string]interface{}, 0)
-
+		// log.Println("stock:", stock.Ticker)
+		// log.Println("HISTORY:", stock.PriceHistory)
+		// log.Println("HISTORY LEN:", len(stock.PriceHistory))
+		// log.Println("--------")
 		historyLen := len(stock.PriceHistory)
 		startIdx := 0
 		if historyLen > 10 {
@@ -52,6 +57,11 @@ func (s *stockService) GetAllStocks(page, limit int) ([]map[string]interface{}, 
 				"target_from": pkg.RoundToTwoDecimals(h.TargetFrom),
 			})
 		}
+
+		// Ordenar el historial de precios por fecha
+		sort.Slice(StockPriceHistoryMapped, func(i, j int) bool {
+			return StockPriceHistoryMapped[i]["time"].(time.Time).Before(StockPriceHistoryMapped[j]["time"].(time.Time))
+		})
 
 		stockResponse := map[string]interface{}{
 			"id":            stock.ID,

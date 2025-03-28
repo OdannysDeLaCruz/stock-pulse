@@ -28,7 +28,7 @@ type StockPartialRedis struct {
 
 func main() {
 	redisClient := redis.NewClient(&redis.Options{
-		Addr: "redis:6379",
+		Addr: "localhost:6379",
 	})
 	ctx := context.Background()
 
@@ -36,7 +36,7 @@ func main() {
 	defer ticker.Stop()
 
 	// Lista de acciones simuladas
-	stocksTicker := []string{"NVDA"}
+	stocksTicker := []string{"MOMO"}
 	ratingList := []string{"Buy", "Hold", "Sell", "Strong-Buy", "Strong-Sell", "Neutral", "Overweight", "Underweight", "Outperform", "Underperform"}
 
 	for {
