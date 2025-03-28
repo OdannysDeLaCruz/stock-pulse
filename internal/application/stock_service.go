@@ -23,7 +23,7 @@ func NewStockService(stockRepo stock.StockRepository, stockExternalRepo stock.St
 	}
 }
 
-func (s *stockService) GetAllStocks(page, limit int) ([]map[string]interface{}, error) {
+func (s *stockService) GetAllStocks(page, limit int) (map[string]interface{}, error) {
 	// Validar límites (máximo 15 stocks por página)
 	if limit <= 0 || limit > 15 {
 		limit = 15
@@ -37,7 +37,7 @@ func (s *stockService) GetAllStocks(page, limit int) ([]map[string]interface{}, 
 		return nil, err
 	}
 	// Mapear los resultados a JSON
-	var stockResponses []map[string]interface{}
+	var stocksList []map[string]interface{}
 	for _, stock := range stocks {
 		var StockPriceHistoryMapped []map[string]interface{} = make([]map[string]interface{}, 0)
 		// log.Println("stock:", stock.Ticker)
@@ -63,7 +63,7 @@ func (s *stockService) GetAllStocks(page, limit int) ([]map[string]interface{}, 
 			return StockPriceHistoryMapped[i]["time"].(time.Time).Before(StockPriceHistoryMapped[j]["time"].(time.Time))
 		})
 
-		stockResponse := map[string]interface{}{
+		stockMapped := map[string]interface{}{
 			"id":            stock.ID,
 			"ticker":        stock.Ticker,
 			"company":       stock.Company,
@@ -78,7 +78,14 @@ func (s *stockService) GetAllStocks(page, limit int) ([]map[string]interface{}, 
 			"analysis":      s.CalculatePriceChange(stock.TargetFrom, stock.TargetTo),
 		}
 
-		stockResponses = append(stockResponses, stockResponse)
+		stocksList = append(stocksList, stockMapped)
+	}
+
+	stockResponses := map[string]interface{}{
+		"results": stocksList,
+		"current": page,
+		"count": len(stocks),
+		"next":  page + 1,
 	}
 
 	return stockResponses, nil

@@ -4,7 +4,7 @@ import "time"
 
 // StockService define los métodos de la capa de negocio
 type StockService interface {
-	GetAllStocks(page, limit int) ([]map[string]interface{}, error)
+	GetAllStocks(page, limit int) (map[string]interface{}, error)
 	GetStockByTicker(ticker string) (map[string]interface{}, error)
 	GetStockByTickerRaw(ticker string) (*Stock, error)
 	GetStockHistory(ticker string, startTime, endTime time.Time) ([]map[string]interface{}, error)
